@@ -36,7 +36,7 @@
     rail.innerHTML = `<div class="ins-head"><div class="ins-title"><span class="ico"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
         <h3>Inspire Feed<small>Your motivation, one click away</small></h3></div></div>
       <div class="ins-tabs">
-        <button class="ins-tab on" type="button">MY LINKS</button>
+        <button class="ins-tab on" type="button">MY LINKS (YOUTUBE ONLY)</button>
       </div>
       <div class="ins-body" id="ins-body"></div><div class="ins-foot" id="ins-foot"></div>`;
     layout.appendChild(rail);
