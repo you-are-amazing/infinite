@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Notepad &amp; Docs - Infinite</title>
+  <meta name="description" content="Write, organize, and revisit your personal notes.">
+  <link rel="icon" href="../deserve.png" type="image/png">
+  <link rel="stylesheet" href="../static/css/style.css?v=19">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
+  <script src="../static/js/auth.js?v=6" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="side-logo">
+      <img src="../deserve.png" alt="Infinite">
+      <div><div class="t1">Infinite</div><div class="t2">We deserve better</div></div>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item" href="../"><i class="fa-solid fa-house"></i><em>Overview</em></a>
+      <a class="nav-item" href="../calendar/"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
+      <a class="nav-item active" href="./"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
+      <a class="nav-item" href="../team/"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
+    </nav>
+    <div class="side-foot">
+      <div class="sync-row"><span class="sync-dot"></span><span id="np-sync">SAVED LOCALLY</span></div>
+      <div class="user-chip">
+        <div class="avatar" id="user-initial">?</div>
+        <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-wrap">
+    <div class="topbar">
+      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>NOTEPAD &amp; DOCS</b></span>
+      <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
+      <div class="top-actions">
+        <div id="auth-account-actions" class="auth-account-actions" hidden></div>
+        <span class="cloud-pill"><i class="fa-solid fa-cloud"></i>Cloud Synced</span>
+      </div>
+    </div>
+
+    <div class="np-shell">
+      <aside class="np-side">
+        <div class="pad">
+          <button class="np-new" id="new-note" type="button">+ New note</button>
+          <div class="np-count"><span>YOUR NOTES</span><span id="note-count">0</span></div>
+          <div class="np-list" id="note-list" aria-label="Saved notes"></div>
+        </div>
+        <div class="np-side-foot">
+          <a class="icon-btn2" href="../" title="Home" aria-label="Back to home" style="text-decoration:none; display:inline-flex; align-items:center; justify-content:center;"><i class="fa-solid fa-house"></i></a>
+        </div>
+      </aside>
+
+      <main class="np-main">
+        <section class="np-editor" aria-label="Note editor">
+          <input id="note-title" type="text" maxlength="120" placeholder="Untitled note" aria-label="Note title">
+          <div id="note-date"></div>
+          <div class="np-tools" role="toolbar" aria-label="Text formatting">
+            <button type="button" data-command="bold" aria-label="Bold">B</button>
+            <button type="button" data-command="italic" aria-label="Italic"><i>I</i></button>
+            <button type="button" data-command="underline" aria-label="Underline"><u>U</u></button>
+            <button type="button" data-command="insertUnorderedList" aria-label="Bulleted list">&bull;</button>
+            <button type="button" data-command="formatBlock" data-value="blockquote" aria-label="Quote">&ldquo;</button>
+            <button type="button" id="highlight-btn" aria-label="Highlight" style="width:auto; padding:0 12px;">Highlight</button>
+          </div>
+          <article id="note-body" contenteditable="true" role="textbox" aria-label="Note body"></article>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="auth-overlay" id="auth-overlay" hidden>
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div>
+        <span class="auth-kicker">WELCOME TO INFINITE</span>
+        <h1 id="auth-title">Make this time yours.</h1>
+        <p id="auth-description">Sign in to keep your progress with you, or continue locally as a guest.</p>
+      </div>
+      <div class="auth-choice-buttons" id="auth-choice-buttons">
+        <button type="button" class="auth-button auth-button-primary" data-auth-choice="signin">Sign In</button>
+        <button type="button" class="auth-button" data-auth-choice="signup">Sign Up</button>
+        <button type="button" class="auth-button auth-button-quiet" data-auth-choice="guest">Continue as Guest</button>
+      </div>
+      <form class="auth-form" id="auth-form" hidden novalidate>
+        <div class="auth-name-field" id="auth-name-field" hidden>
+          <label for="auth-name">Name</label>
+          <input id="auth-name" name="name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <label for="auth-email">Email</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" required>
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" required>
+        <p class="auth-error" id="auth-error" role="alert"></p>
+        <button type="submit" class="auth-button auth-button-primary" id="auth-submit">Sign In</button>
+        <button type="button" class="auth-inline-toggle" id="auth-mode-toggle">Don't have an account? <span>Sign up</span></button>
+        <button type="button" class="auth-back-button" id="auth-back">Back</button>
+      </form>
+      <div class="auth-guest-confirm" id="auth-guest-confirm" hidden>
+        <div class="auth-guest-icon"><i class="fa-solid fa-hard-drive"></i></div>
+        <p class="auth-guest-message">As a guest, your goals, notes, and calendar are saved only in <strong>this browser, on this device</strong>. Come back here anytime and it'll all be waiting for you — but clearing your browser data or switching devices means it won't come with you.</p>
+        <div class="auth-guest-name-field">
+          <label for="auth-guest-name">Name (optional)</label>
+          <input id="auth-guest-name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <button type="button" class="auth-button auth-button-primary" id="auth-guest-confirm-btn">Got it, continue as guest</button>
+        <button type="button" class="auth-button auth-button-quiet" id="auth-guest-signup-btn">Sign up instead</button>
+        <button type="button" class="auth-back-button" id="auth-guest-back">Back</button>
+      </div>
+      <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const storageKey = 'life_notes';
+      const title = document.getElementById('note-title');
+      const body = document.getElementById('note-body');
+      const list = document.getElementById('note-list');
+      const count = document.getElementById('note-count');
+      const date = document.getElementById('note-date');
+      let notes = loadNotes();
+      let activeId = notes[0]?.id || null;
+
+      function tickClock() {
+        const n = new Date();
+        document.getElementById('utc-clock').textContent =
+          String(n.getUTCHours()).padStart(2,'0') + ':' + String(n.getUTCMinutes()).padStart(2,'0') + ':' + String(n.getUTCSeconds()).padStart(2,'0') + ' UTC';
+      }
+      setInterval(tickClock, 1000); tickClock();
+
+      function refreshUser() {
+        const name = localStorage.getItem('life_user_name') || (window.lifeIsShortUser && (window.lifeIsShortUser.displayName || window.lifeIsShortUser.email)) || 'Guest';
+        document.getElementById('user-name').textContent = name;
+        document.getElementById('user-initial').textContent = (name || '?').trim().split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
+        const mode = localStorage.getItem('lifeIsShort_mode');
+        document.getElementById('np-sync').textContent = mode === 'account' ? 'SYNCED · CLOUD' : 'SAVED LOCALLY · THIS DEVICE';
+      }
+      refreshUser();
+      document.addEventListener('lifeIsShortAuthState', refreshUser);
+
+      function loadNotes() {
+        try {
+          const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+          if (!Array.isArray(value)) return [];
+          return value.map((n) => ({
+            id: n && n.id ? n.id : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            title: (n && typeof n.title === 'string') ? n.title : '',
+            body: (n && typeof n.body === 'string') ? n.body : '',
+            updatedAt: (n && n.updatedAt) ? n.updatedAt : new Date().toISOString(),
+          }));
+        } catch (error) { return []; }
+      }
+
+      function activeNote() { return notes.find((note) => note.id === activeId); }
+
+      function saveNotes() {
+        localStorage.setItem(storageKey, JSON.stringify(notes));
+        renderList();
+      }
+
+      function renderList() {
+        count.textContent = notes.length;
+        list.replaceChildren();
+        if (!notes.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty-hint';
+          empty.style.padding = '12px 6px';
+          empty.textContent = 'Your notes will appear here.';
+          list.appendChild(empty);
+          return;
+        }
+        notes.forEach((note) => {
+          const item = document.createElement('div');
+          item.className = `np-item${note.id === activeId ? ' active' : ''}`;
+
+          const main = document.createElement('button');
+          main.type = 'button';
+          main.className = 'np-item-main';
+          const heading = document.createElement('b');
+          heading.textContent = note.title || 'Untitled note';
+          const preview = document.createElement('span');
+          preview.textContent = (note.body || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || 'Empty note';
+          main.append(heading, preview);
+          main.addEventListener('click', () => openNote(note.id));
+
+          const del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'np-del';
+          del.setAttribute('aria-label', 'Delete note');
+          del.title = 'Delete note';
+          del.textContent = '×';
+          del.addEventListener('click', (event) => {
+            event.stopPropagation();
+            deleteNote(note.id);
+          });
+
+          item.append(main, del);
+          list.appendChild(item);
+        });
+      }
+
+      function openNote(id) {
+        activeId = id;
+        const note = activeNote();
+        if (!note) return;
+        title.value = note.title || '';
+        body.innerHTML = note.body || '';
+        date.textContent = `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}`;
+        renderList();
+      }
+
+      function createNote() {
+        const now = new Date().toISOString();
+        const note = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, title: '', body: '', updatedAt: now };
+        notes.unshift(note);
+        activeId = note.id;
+        saveNotes();
+        openNote(note.id);
+        title.focus();
+      }
+
+      function updateNote() {
+        const note = activeNote();
+        if (!note) return;
+        note.title = title.value;
+        note.body = body.innerHTML;
+        note.updatedAt = new Date().toISOString();
+        date.textContent = `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}`;
+        saveNotes();
+      }
+
+      function deleteNote(id) {
+        if (!window.confirm('Delete this note?')) return;
+        notes = notes.filter((note) => note.id !== id);
+        if (activeId === id) {
+          activeId = notes[0]?.id || null;
+          if (activeId) { saveNotes(); openNote(activeId); }
+          else { saveNotes(); title.value = ''; body.innerHTML = ''; date.textContent = ''; renderList(); }
+        } else { saveNotes(); }
+      }
+
+      function closestHighlight(node) {
+        while (node && node !== body) {
+          if (node.nodeType === 1 && node.tagName === 'MARK' && node.classList.contains('note-highlight')) return node;
+          node = node.parentNode;
+        }
+        return null;
+      }
+
+      function unwrapMark(mark) {
+        const parent = mark.parentNode;
+        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+        parent.removeChild(mark);
+      }
+
+      function toggleHighlight() {
+        const sel = window.getSelection();
+        if (!sel.rangeCount || sel.isCollapsed) { body.focus(); return; }
+        const range = sel.getRangeAt(0);
+        if (!body.contains(range.commonAncestorContainer)) { body.focus(); return; }
+
+        const existingMark = closestHighlight(sel.anchorNode);
+        if (existingMark) {
+          unwrapMark(existingMark);
+        } else {
+          const mark = document.createElement('mark');
+          mark.className = 'note-highlight';
+          try { range.surroundContents(mark); }
+          catch (error) {
+            const frag = range.extractContents();
+            mark.appendChild(frag);
+            range.insertNode(mark);
+          }
+        }
+        sel.removeAllRanges();
+        body.focus();
+        updateNote();
+      }
+
+      document.getElementById('new-note').addEventListener('click', createNote);
+      [title, body].forEach((element) => element.addEventListener('input', updateNote));
+      document.getElementById('highlight-btn').addEventListener('click', toggleHighlight);
+      document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => {
+        document.execCommand(button.dataset.command, false, button.dataset.value || null);
+        body.focus();
+        updateNote();
+      }));
+
+      document.addEventListener('lifeIsShortDataReady', () => {
+        notes = loadNotes();
+        activeId = notes[0]?.id || null;
+        renderList();
+        if (activeId) openNote(activeId);
+        else { title.value = ''; body.innerHTML = ''; date.textContent = ''; }
+      });
+
+      renderList();
+      if (activeId) openNote(activeId); else createNote();
+    })();
+  </script>
+
+  <dialog id="password-dialog" class="auth-password-dialog">
+    <form class="auth-form" id="password-form" novalidate>
+      <h2>Update password</h2>
+      <p class="auth-password-warning">Please save your password somewhere else too. This site does not offer password recovery.</p>
+      <label for="current-password">Current password</label>
+      <input id="current-password" type="password" autocomplete="current-password" required>
+      <label for="new-password">New password</label>
+      <input id="new-password" type="password" autocomplete="new-password" minlength="6" required>
+      <label for="confirm-password">Confirm new password</label>
+      <input id="confirm-password" type="password" autocomplete="new-password" minlength="6" required>
+      <p class="auth-error" id="password-error" role="alert"></p>
+      <button type="submit" class="auth-button auth-button-primary" id="password-submit">Update password</button>
+      <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
+    </form>
+  </dialog>
+</body>
+</html>

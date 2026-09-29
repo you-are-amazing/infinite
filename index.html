@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Infinite – Dashboard</title>
+  <meta name="description" content="Track goals together: daily, weekly, monthly, and yearly progress, life calendar, notepad, and team accountability.">
+  <link rel="icon" href="deserve.png" type="image/png">
+  <link rel="stylesheet" href="static/css/style.css?v=20">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
+  <script src="static/js/auth.js?v=6" defer></script>
+  <script src="static/js/sticky-notes.js?v=2" defer></script>
+  <script src="static/js/dashboard.js?v=4" defer></script>
+  <script src="static/js/inspire.js?v=3" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="side-logo">
+      <img src="deserve.png" alt="Infinite">
+      <div><div class="t1">Infinite</div><div class="t2">We deserve better</div></div>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item active" href="./"><i class="fa-solid fa-house"></i><em>Overview</em></a>
+      <a class="nav-item" href="calendar/"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
+      <a class="nav-item" href="notepad/"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
+      <a class="nav-item" href="team/"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
+    </nav>
+    <div class="side-foot">
+      <div class="cad-mini">
+        <div class="lbl"><span>THIS YEAR</span><b id="side-day">DAY –/–</b></div>
+        <div class="track"><div class="fill" id="side-year-fill"></div></div>
+      </div>
+      <div class="sync-row"><span class="sync-dot"></span><span id="side-sync">SYNCED · LOCAL</span></div>
+      <div class="user-chip">
+        <div class="avatar" id="user-initial">?</div>
+        <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-wrap">
+    <div class="topbar">
+      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>DASHBOARD</b></span>
+      <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
+      <div class="top-actions">
+        <div id="auth-account-actions" class="auth-account-actions" hidden></div>
+        <button type="button" class="sticky-bell-btn" id="sticky-bell-btn" title="Open sticky notes" aria-label="Open sticky notes">
+          <i class="fa-solid fa-thumbtack"></i>
+          <span class="sticky-bell-badge" id="sticky-bell-badge" hidden>0</span>
+        </button>
+        <span class="cloud-pill"><i class="fa-solid fa-cloud"></i>Cloud Synced</span>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="kicker"><span class="dot"></span>YOUR PROGRESS · <span id="epoch-lbl">THIS YEAR</span></div>
+          <h1 class="page-title">Your Progress</h1>
+          <div class="page-sub" id="tz-lbl">UTC+05:30 · LOCAL</div>
+        </div>
+      </div>
+
+      <!-- Year hero -->
+      <section class="hero-card">
+        <div class="hero-top">
+          <span class="hero-year" id="hero-year">2026</span>
+          <span class="hero-pct" id="hero-pct">0%</span>
+          <span class="hero-meta"><b id="hero-elapsed">0</b>d elapsed<span class="sep">|</span><b id="hero-left">0</b>d remaining</span>
+          <span class="velocity"><i class="fa-solid fa-bolt"></i> PACE: <b id="hero-velocity">1.00×</b> OF AVERAGE</span>
+        </div>
+        <div class="year-track">
+          <div class="yt-end">END: DEC 31</div>
+          <div class="yt-bar">
+            <div class="yt-fill" id="yt-fill"><span class="start-lbl">START: JAN 01</span><span class="yt-badge" id="yt-badge">0%</span></div>
+            <div class="today-flag" id="today-flag"><span class="pin"></span>TODAY: <span id="today-lbl">—</span></div>
+          </div>
+          <div class="yt-ticks" id="yt-ticks"></div>
+        </div>
+        <div class="quarters" id="quarters"></div>
+      </section>
+
+      <!-- Progress cards -->
+      <div class="cards-grid">
+        <div class="cad-card">
+          <div class="donut">
+            <svg width="92" height="92" viewBox="0 0 92 92">
+              <circle class="dc-track" cx="46" cy="46" r="40"></circle>
+              <circle class="dc-ring" id="donut-year" cx="46" cy="46" r="40" stroke="#8f8ff0"></circle>
+            </svg>
+            <div class="dc-center"><span class="dc-val" id="dval-year">0%</span><span class="dc-lbl">DONE</span></div>
+          </div>
+          <div class="cad-info">
+            <div class="cad-eyebrow">YEARLY PROGRESS</div>
+            <div class="cad-name" id="cad-year-name">Year 2026</div>
+            <div class="kv">ELAPSED <b id="y-elapsed">0</b> Days</div>
+            <div class="kv">REMAINING <b class="remain" id="y-left">0</b> Days</div>
+            <div class="cad-foot" id="y-weeks">0 WEEKS FINISHED</div>
+          </div>
+          <i class="fa-solid fa-chart-pie icon"></i>
+        </div>
+        <div class="cad-card">
+          <div class="donut">
+            <svg width="92" height="92" viewBox="0 0 92 92">
+              <circle class="dc-track" cx="46" cy="46" r="40"></circle>
+              <circle class="dc-ring" id="donut-month" cx="46" cy="46" r="40" stroke="#3ddc97"></circle>
+            </svg>
+            <div class="dc-center"><span class="dc-val" id="dval-month">0%</span><span class="dc-lbl">DONE</span></div>
+          </div>
+          <div class="cad-info">
+            <div class="cad-eyebrow">MONTHLY PROGRESS</div>
+            <div class="cad-name" id="cad-month-name">Month</div>
+            <div class="kv">ELAPSED <b id="m-elapsed">0</b> Days</div>
+            <div class="kv">REMAINING <b class="remain" id="m-left">0</b> Days</div>
+            <div class="cad-foot" id="m-next">—</div>
+          </div>
+          <i class="fa-solid fa-calendar-check icon"></i>
+        </div>
+        <div class="cad-card">
+          <div class="donut">
+            <svg width="92" height="92" viewBox="0 0 92 92">
+              <circle class="dc-track" cx="46" cy="46" r="40"></circle>
+              <circle class="dc-ring" id="donut-week" cx="46" cy="46" r="40" stroke="#f5b04a"></circle>
+            </svg>
+            <div class="dc-center"><span class="dc-val" id="dval-week">0%</span><span class="dc-lbl">OF WEEK</span></div>
+          </div>
+          <div class="cad-info">
+            <div class="cad-eyebrow">WEEKLY PROGRESS</div>
+            <div class="cad-name" id="cad-week-name">Week –/52</div>
+            <div class="kv">ELAPSED <b id="w-elapsed">0</b> Days</div>
+            <div class="kv">REMAINING <b class="remain" id="w-left">0</b> Days</div>
+            <div class="kv">TODAY <b id="w-dayname">—</b></div>
+            <div class="cad-foot" id="w-done-count">0 OF 0 COMPLETED</div>
+          </div>
+
+          <i class="fa-regular fa-calendar icon"></i>
+        </div>
+      </div>
+
+      <!-- Daily quote -->
+      <div class="quote-card">
+        <div class="quote-icon"><i class="fa-solid fa-book-open"></i></div>
+        <div class="quote-body">
+          <div class="quote-eyebrow">QUOTE OF THE DAY <span id="axiom-day">· Day –</span></div>
+          <div class="axiom" id="axiom-text">"The trouble is, you think you have time."</div>
+          <div class="axiom-by" id="axiom-by">— Jack Kornfield</div>
+        </div>
+        <div class="quote-actions">
+          <button class="icon-btn2" id="axiom-refresh" title="Another quote" aria-label="Another quote"><i class="fa-solid fa-rotate"></i></button>
+          <button class="icon-btn2" id="axiom-copy" title="Copy quote" aria-label="Copy quote"><i class="fa-regular fa-copy"></i></button>
+        </div>
+      </div>
+
+      <!-- My Goals -->
+      <div class="section-head">
+        <h2><i class="fa-solid fa-layer-group" style="color:var(--lav); margin-right:9px;"></i>My Goals</h2>
+        <span class="mini-link">DAILY · WEEKLY · MONTHLY · YEARLY</span>
+      </div>
+      <div class="vectors">
+        <div class="vector-col">
+          <div class="v-head"><span class="v-dot" style="background:var(--green)"></span><span class="v-name">TODAY</span><span class="v-meta" id="daily-count">0/0 DONE</span></div>
+          <div class="v-list" id="daily-list"></div>
+          <div class="v-add"><input type="text" id="daily-input" placeholder="Add a task for today..." maxlength="120"><button type="button" id="daily-add" aria-label="Add daily action">+</button></div>
+        </div>
+        <div class="vector-col">
+          <div class="v-head"><span class="v-dot" style="background:var(--lav)"></span><span class="v-name">THIS WEEK</span><span class="v-meta" id="weekly-meta">W– FOCUS</span></div>
+          <div class="v-list" id="weekly-list"></div>
+          <div class="v-add"><input type="text" id="weekly-input" placeholder="Add a weekly goal..." maxlength="120"><button type="button" id="weekly-add" aria-label="Add weekly goal">+</button></div>
+          <div class="v-progress"><div class="pnum"><b id="weekly-pct">0%</b> READY</div><div class="v-bar"><i id="weekly-bar"></i></div></div>
+          <div class="v-foot" id="weekly-foot">0 OF 0 GOALS DONE</div>
+        </div>
+        <div class="vector-col">
+          <div class="v-head"><span class="v-dot" style="background:var(--amber)"></span><span class="v-name">THIS MONTH</span><span class="v-meta" id="monthly-meta">—</span></div>
+          <div class="v-list" id="monthly-list"></div>
+          <div class="v-add"><input type="text" id="monthly-input" placeholder="Add a monthly goal..." maxlength="120"><button type="button" id="monthly-add" aria-label="Add monthly goal">+</button></div>
+          <div class="v-foot">FINISH BY MONTH END</div>
+        </div>
+        <div class="vector-col">
+          <div class="v-head"><span class="v-dot" style="background:var(--red)"></span><span class="v-name">THIS YEAR</span><span class="v-meta" id="yearly-meta">GOALS</span></div>
+          <div class="v-list" id="yearly-list"></div>
+          <div class="v-add"><input type="text" id="yearly-input" placeholder="Add a yearly goal..." maxlength="120"><button type="button" id="yearly-add" aria-label="Add yearly goal">+</button></div>
+          <div class="v-foot">YEARLY GOALS</div>
+        </div>
+      </div>
+
+      <!-- Life Sheet -->
+      <div class="section-head">
+        <h2><i class="fa-solid fa-table" style="color:var(--green); margin-right:9px;"></i>Life Sheet</h2>
+        <span class="tag">HABIT TRACKER</span>
+      </div>
+      <section class="sheet-panel">
+        <div class="sheet-top">
+          <div id="sheet-tabs" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+          <div class="sheet-tools">
+            <button class="tool-btn" id="add-sheet-btn" type="button">+ Sheet</button>
+            <button class="tool-btn" id="add-sheet-row" type="button">+ Row</button>
+            <button class="tool-btn" id="add-sheet-col" type="button">+ Col</button>
+            <button class="tool-btn danger" id="delete-sheet-btn" type="button">Delete</button>
+          </div>
+        </div>
+        <div class="sheet-wrap"><table class="lsheet" id="life-sheet"></table></div>
+        <div class="sheet-foot"><span id="sheet-stats">ROWS: 0 · CELLS VALIDATED: 100%</span><span class="auto"><i class="fa-solid fa-cloud-arrow-up"></i> AUTO-SAVED TO CLOUD</span></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="color-pop" id="sheet-color-pop">
+    <div class="cp-title">CELL COLOR</div>
+    <div class="color-grid" id="color-grid"></div>
+    <button class="cp-none" id="color-none" type="button">× &nbsp;No color</button>
+  </div>
+
+  <div class="toast" id="toast">Saved</div>
+
+  <!-- Sticky notes dialog -->
+  <dialog id="sticky-notes-dialog" class="goal-dialog sticky-notes-dialog">
+    <form method="dialog">
+      <h3>Sticky Notes <span class="sticky-notes-subtitle">Important reminders</span></h3>
+      <div class="sticky-add-row"><input type="text" id="sticky-note-text" placeholder="Add an important task..." maxlength="200"><button type="button" class="dialog-btn primary" id="sticky-add-btn">Add</button></div>
+      <div id="sticky-notes-list" class="sticky-notes-list"></div>
+      <div class="sticky-glow-toggle-row"><span class="sticky-toggle-label">Glow reminder on header<span class="sticky-toggle-hint">Pulses while tasks are pending</span></span><label class="switch"><input type="checkbox" id="sticky-glow-toggle" checked aria-label="Enable glow reminder"><span class="switch-slider"></span></label></div>
+      <div class="dialog-buttons"><button type="button" class="dialog-btn secondary" id="sticky-notes-close">Close</button></div>
+    </form>
+  </dialog>
+  <div class="sticky-reminder-overlay" id="sticky-reminder-overlay" hidden>
+    <div class="sticky-reminder-modal" role="alertdialog" aria-modal="true">
+      <div class="sticky-reminder-icon"><i class="fa-solid fa-thumbtack"></i></div>
+      <h2>You have pending important tasks</h2>
+      <ul class="sticky-reminder-list" id="sticky-reminder-list"></ul>
+      <div class="sticky-reminder-actions"><button type="button" class="auth-button auth-button-primary" id="sticky-reminder-open">Open sticky notes</button><button type="button" class="auth-back-button" id="sticky-reminder-dismiss">Dismiss for now</button></div>
+    </div>
+  </div>
+
+  <!-- Password dialog (auth.js) -->
+  <dialog id="password-dialog" class="auth-password-dialog">
+    <form class="auth-form" id="password-form" novalidate>
+      <h2>Update password</h2>
+      <p class="auth-password-warning">Please save your password somewhere else too. This site does not offer password recovery.</p>
+      <label for="current-password">Current password</label>
+      <input id="current-password" type="password" autocomplete="current-password" required>
+      <label for="new-password">New password</label>
+      <input id="new-password" type="password" autocomplete="new-password" minlength="6" required>
+      <label for="confirm-password">Confirm new password</label>
+      <input id="confirm-password" type="password" autocomplete="new-password" minlength="6" required>
+      <p class="auth-error" id="password-error" role="alert"></p>
+      <button type="submit" class="auth-button auth-button-primary" id="password-submit">Update password</button>
+      <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
+    </form>
+  </dialog>
+
+  <!-- Auth overlay (auth.js) -->
+  <div class="auth-overlay" id="auth-overlay" hidden>
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div>
+        <span class="auth-kicker">WELCOME TO INFINITE</span>
+        <h1 id="auth-title">Make this time yours.</h1>
+        <p id="auth-description">Sign in to keep your progress with you, or continue locally as a guest.</p>
+      </div>
+      <div class="auth-choice-buttons" id="auth-choice-buttons">
+        <button type="button" class="auth-button auth-button-primary" data-auth-choice="signin">Sign In</button>
+        <button type="button" class="auth-button" data-auth-choice="signup">Sign Up</button>
+        <button type="button" class="auth-button auth-button-quiet" data-auth-choice="guest">Continue as Guest</button>
+      </div>
+      <form class="auth-form" id="auth-form" hidden novalidate>
+        <div class="auth-name-field" id="auth-name-field" hidden>
+          <label for="auth-name">Name</label>
+          <input id="auth-name" name="name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <label for="auth-email">Email</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" required>
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" required>
+        <p class="auth-error" id="auth-error" role="alert"></p>
+        <button type="submit" class="auth-button auth-button-primary" id="auth-submit">Sign In</button>
+        <button type="button" class="auth-inline-toggle" id="auth-mode-toggle">Don't have an account? <span>Sign up</span></button>
+        <button type="button" class="auth-back-button" id="auth-back">Back</button>
+      </form>
+      <div class="auth-guest-confirm" id="auth-guest-confirm" hidden>
+        <div class="auth-guest-icon"><i class="fa-solid fa-hard-drive"></i></div>
+        <p class="auth-guest-message">As a guest, your goals, notes, and calendar are saved only in <strong>this browser, on this device</strong>. Come back here anytime and it'll all be waiting for you — but clearing your browser data or switching devices means it won't come with you.</p>
+        <div class="auth-guest-name-field">
+          <label for="auth-guest-name">Name (optional)</label>
+          <input id="auth-guest-name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <button type="button" class="auth-button auth-button-primary" id="auth-guest-confirm-btn">Got it, continue as guest</button>
+        <button type="button" class="auth-button auth-button-quiet" id="auth-guest-signup-btn">Sign up instead</button>
+        <button type="button" class="auth-back-button" id="auth-guest-back">Back</button>
+      </div>
+      <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team Goals - Infinite</title>
+  <meta name="description" content="Track goals together with your team: shared goals, chat, and kudos.">
+  <link rel="icon" href="../deserve.png" type="image/png">
+  <link rel="stylesheet" href="../static/css/style.css?v=19">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
+  <script src="../static/js/auth.js?v=6" defer></script>
+  <script src="../static/js/team.js?v=3" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="side-logo">
+      <img src="../deserve.png" alt="Infinite">
+      <div><div class="t1">Infinite</div><div class="t2">We deserve better</div></div>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item" href="../"><i class="fa-solid fa-house"></i><em>Overview</em></a>
+      <a class="nav-item" href="../calendar/"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
+      <a class="nav-item" href="../notepad/"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
+      <a class="nav-item active" href="./"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
+    </nav>
+    <div class="side-foot">
+      <div class="cad-mini">
+        <div class="lbl"><span>COHORTS</span><b>TEAMS</b></div>
+        <div class="team-list-wrap" id="team-list"><div class="empty-hint" style="padding:8px 12px;">Sign in to see your teams.</div></div>
+      </div>
+      <div class="sync-row"><span class="sync-dot"></span><span>REALTIME · FIRESTORE</span></div>
+      <div class="user-chip">
+        <div class="avatar" id="user-initial">?</div>
+        <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-wrap">
+    <div class="topbar">
+      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>TEAM GOALS</b></span>
+      <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
+      <div class="top-actions">
+        <div id="auth-account-actions" class="auth-account-actions" hidden></div>
+        <span class="cloud-pill"><i class="fa-solid fa-cloud"></i>Cloud Synced</span>
+      </div>
+    </div>
+
+    <div class="page page-wide">
+      <!-- Signed-out state -->
+      <div class="no-auth-state" id="no-auth-state" hidden>
+        <i class="fa-solid fa-user-lock"></i>
+        <h2>Sign in to run with a cohort</h2>
+        <p>Teams are shared with other people, so you need an account (guest mode stays local to this browser and can't sync).</p>
+        <form id="team-auth-form">
+          <div id="team-auth-name-wrap" hidden><input id="team-auth-name" type="text" placeholder="Your name" autocomplete="name"></div>
+          <input id="team-auth-email" type="email" placeholder="Email" autocomplete="email" required>
+          <input id="team-auth-password" type="password" placeholder="Password" autocomplete="current-password" minlength="6" required>
+          <p class="form-error" id="team-auth-error"></p>
+          <button type="submit" class="btn btn-lav" id="team-auth-submit" style="justify-content:center;">Sign in</button>
+          <button type="button" class="auth-toggle" id="team-auth-toggle">Don't have an account? Sign up</button>
+        </form>
+      </div>
+
+      <div class="no-team-state" id="no-team-state" hidden>
+        <i class="fa-solid fa-users"></i>
+        <h2>No cohort selected</h2>
+        <p>Create a team for you and your friends, or join one with an invite code.</p>
+      </div>
+
+      <!-- Team content -->
+      <div id="team-content" hidden>
+        <div class="team-head">
+          <div>
+            <div class="team-name"><i class="fa-solid fa-bolt"></i><span id="team-name">Sprint Team</span></div>
+            <div class="team-sub" id="team-sub">MEMBERS</div>
+          </div>
+          <div class="invite-chip">
+            <i class="fa-solid fa-key"></i> INVITE: <code id="team-invite-code">------</code>
+            <button type="button" id="copy-invite-btn" title="Copy invite code"><i class="fa-regular fa-copy"></i></button>
+          </div>
+          <div class="team-head-actions">
+            <div class="member-avatars" id="member-avatars"></div>
+            <button class="btn btn-green" id="create-team-btn" type="button"><i class="fa-solid fa-plus"></i>New Team</button>
+            <button class="btn" id="join-team-btn" type="button"><i class="fa-solid fa-right-to-bracket"></i>Join Code</button>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric-card">
+            <div class="ml"><i class="fa-solid fa-arrow-trend-up"></i>TEAM MOMENTUM</div>
+            <div class="mv" id="metric-momentum">—</div>
+            <div class="ms" id="metric-momentum-sub">shared goals in progress</div>
+          </div>
+          <div class="metric-card">
+            <div class="ml"><i class="fa-regular fa-clock"></i>ACTIVE SYNC SPRINT</div>
+            <div class="mv amber" id="metric-week">—</div>
+            <div class="ms" id="metric-week-sub">of the 52-week year</div>
+          </div>
+          <div class="metric-card">
+            <div class="ml"><i class="fa-regular fa-hourglass-half"></i>COHORT STREAK</div>
+            <div class="mv lav" id="metric-streak">—</div>
+            <div class="ms">days since the team was formed</div>
+          </div>
+          <div class="metric-card">
+            <div class="ml"><i class="fa-solid fa-fire"></i>KUDOS CIRCULATED</div>
+            <div class="mv" id="metric-kudos">0</div>
+            <div class="ms" id="metric-kudos-sub">cheers given across the cohort</div>
+          </div>
+        </div>
+
+        <div class="team-cols">
+          <div>
+            <div class="team-tabs">
+              <button class="team-tab active" data-tab="goals" type="button"><i class="fa-solid fa-bullseye"></i>Goals &amp; Execution <span class="cnt" id="goals-count">0</span></button>
+              <button class="team-tab" data-tab="chat" type="button"><i class="fa-regular fa-comments"></i>Team Comms <span class="new">WIRE</span></button>
+              <button class="team-tab" data-tab="rewards" type="button"><i class="fa-solid fa-trophy"></i>Kudos &amp; Wall of Wins</button>
+              <button class="team-tab" data-tab="members" type="button"><i class="fa-solid fa-users-gear"></i>Cohort Roster <span class="cnt" id="members-count">0</span></button>
+            </div>
+
+            <div id="tab-goals">
+              <div class="panel">
+                <div class="section-head" style="margin:0 0 13px;">
+                  <h2 style="font-size:14px;"><i class="fa-solid fa-bullseye" style="color:var(--green); margin-right:8px;"></i>Add a New Goal</h2>
+                  <span class="mini-link">MAKE TODAY COUNT</span>
+                </div>
+                <div class="commit-row">
+                  <input type="text" id="goal-title-input" placeholder="e.g. Finish one course chapter" maxlength="140">
+                  <select id="goal-cadence-select">
+                    <option value="daily">Repeat: Daily</option>
+                    <option value="weekly">Repeat: Weekly</option>
+                    <option value="yearly">Repeat: Yearly</option>
+                  </select>
+                  <select id="goal-type-select">
+                    <option value="team">Team Collective (Everyone)</option>
+                    <option value="self">Personal Dispatch (Self)</option>
+                  </select>
+                  <button class="btn btn-lav" id="add-goal-btn" type="button"><i class="fa-solid fa-paper-plane"></i>Deploy</button>
+                </div>
+                <div class="section-head" style="margin:6px 0 11px;">
+                  <h2 style="font-size:14px;"><i class="fa-solid fa-diagram-project" style="color:var(--lav); margin-right:8px;"></i>Team Shared Goals</h2>
+                  <span class="mini-link">ALL PARTICIPANTS</span>
+                </div>
+                <div id="goals-list"></div>
+              </div>
+            </div>
+
+            <div id="tab-chat" hidden>
+              <div class="panel">
+                <div class="section-head" style="margin:0 0 12px;">
+                  <h2 style="font-size:14px;"><i class="fa-regular fa-comments" style="color:var(--amber); margin-right:8px;"></i>Team Comms</h2>
+                  <span class="mini-link">LIVE WIRE ON THE RIGHT →</span>
+                </div>
+                <p style="color:var(--muted); font-size:12.5px;">The Cohort Wire panel on the right is the live team feed — it updates in real time and stays open whichever tab you pick.</p>
+              </div>
+            </div>
+
+            <div id="tab-rewards" hidden>
+              <div class="panel">
+                <div class="section-head" style="margin:0 0 12px;">
+                  <h2 style="font-size:14px;"><i class="fa-solid fa-trophy" style="color:var(--amber); margin-right:8px;"></i>Streak Hall &amp; Kudos Feed</h2>
+                  <span class="mini-link">PEER RECOGNITION</span>
+                </div>
+                <div class="commit-row">
+                  <input type="text" id="reward-title-input" placeholder="e.g. Finished a full week streak" maxlength="140">
+                  <button class="btn btn-lav" id="add-reward-btn" type="button"><i class="fa-solid fa-plus"></i>Post Win</button>
+                </div>
+                <div id="rewards-list"></div>
+              </div>
+            </div>
+
+            <div id="tab-members" hidden>
+              <div class="panel">
+                <div class="section-head" style="margin:0 0 6px;">
+                  <h2 style="font-size:14px;"><i class="fa-solid fa-users-gear" style="color:var(--lav); margin-right:8px;"></i>Cohort Roster</h2>
+                </div>
+                <div id="members-list"></div>
+                <div class="section-head" style="margin:18px 0 10px;"><h2 style="font-size:13px;">DANGER ZONE</h2></div>
+                <button class="btn" id="leave-team-btn" type="button"><i class="fa-solid fa-door-open"></i>Leave this team</button>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="panel wire">
+              <div class="wire-head"><span class="live"></span>COHORT WIRE <span class="tag">REALTIME</span></div>
+              <div class="wire-msgs" id="chat-messages"></div>
+              <form class="wire-input" id="chat-form">
+                <input type="text" id="chat-input" placeholder="Message the team or broadcast..." autocomplete="off" maxlength="300">
+                <button type="submit" aria-label="Send"><i class="fa-solid fa-arrow-up"></i></button>
+              </form>
+            </div>
+            <div class="wire-quote">
+              <div class="q">"You could be good today; instead you choose tomorrow."</div>
+              <div class="by">— Marcus Aurelius, Meditations IX.22</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="auth-overlay" id="auth-overlay" hidden>
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div>
+        <span class="auth-kicker">WELCOME TO INFINITE</span>
+        <h1 id="auth-title">Make this time yours.</h1>
+        <p id="auth-description">Sign in to keep your progress with you, or continue locally as a guest.</p>
+      </div>
+      <div class="auth-choice-buttons" id="auth-choice-buttons">
+        <button type="button" class="auth-button auth-button-primary" data-auth-choice="signin">Sign In</button>
+        <button type="button" class="auth-button" data-auth-choice="signup">Sign Up</button>
+        <button type="button" class="auth-button auth-button-quiet" data-auth-choice="guest">Continue as Guest</button>
+      </div>
+      <form class="auth-form" id="auth-form" hidden novalidate>
+        <div class="auth-name-field" id="auth-name-field" hidden>
+          <label for="auth-name">Name</label>
+          <input id="auth-name" name="name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <label for="auth-email">Email</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" required>
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" required>
+        <p class="auth-error" id="auth-error" role="alert"></p>
+        <button type="submit" class="auth-button auth-button-primary" id="auth-submit">Sign In</button>
+        <button type="button" class="auth-inline-toggle" id="auth-mode-toggle">Don't have an account? <span>Sign up</span></button>
+        <button type="button" class="auth-back-button" id="auth-back">Back</button>
+      </form>
+      <div class="auth-guest-confirm" id="auth-guest-confirm" hidden>
+        <div class="auth-guest-icon"><i class="fa-solid fa-hard-drive"></i></div>
+        <p class="auth-guest-message">As a guest, your goals, notes, and calendar are saved only in <strong>this browser, on this device</strong>. Come back here anytime and it'll all be waiting for you — but clearing your browser data or switching devices means it won't come with you.</p>
+        <div class="auth-guest-name-field">
+          <label for="auth-guest-name">Name (optional)</label>
+          <input id="auth-guest-name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <button type="button" class="auth-button auth-button-primary" id="auth-guest-confirm-btn">Got it, continue as guest</button>
+        <button type="button" class="auth-button auth-button-quiet" id="auth-guest-signup-btn">Sign up instead</button>
+        <button type="button" class="auth-back-button" id="auth-guest-back">Back</button>
+      </div>
+      <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <script>
+    // tiny helpers independent of team.js
+    function tickClock() {
+      const n = new Date();
+      const el = document.getElementById('utc-clock');
+      if (el) el.textContent = String(n.getUTCHours()).padStart(2,'0') + ':' + String(n.getUTCMinutes()).padStart(2,'0') + ':' + String(n.getUTCSeconds()).padStart(2,'0') + ' UTC';
+    }
+    setInterval(tickClock, 1000); tickClock();
+
+    function refreshUser() {
+      const name = localStorage.getItem('life_user_name') || (window.lifeIsShortUser && (window.lifeIsShortUser.displayName || window.lifeIsShortUser.email)) || 'Guest';
+      const nm = document.getElementById('user-name'), ini = document.getElementById('user-initial');
+      if (nm) nm.textContent = name;
+      if (ini) ini.textContent = (name || '?').trim().split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
+    }
+    refreshUser();
+    document.addEventListener('lifeIsShortAuthState', refreshUser);
+
+    // Metric cards (static cadence metrics + live counts where available)
+    function renderMetrics() {
+      const now = new Date();
+      const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const ys = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      const week = Math.ceil((((d - ys) / 864e5) + 1) / 7);
+      const mw = document.getElementById('metric-week');
+      if (mw) { mw.textContent = 'WEEK ' + week; document.getElementById('metric-week-sub').textContent = now.getFullYear() + ' cadence · ' + Math.max(0, 52 - week) + ' weeks left'; }
+      // momentum = % of weekly goals done (personal mirror) or fallback
+      try {
+        const g = JSON.parse(localStorage.getItem('goals') || '[]');
+        const wk = g.filter(x => x.goal_type === 'weekly');
+        const pct = wk.length ? Math.round(wk.filter(x => x.done).length / wk.length * 1000) / 10 : 94.2;
+        const mm = document.getElementById('metric-momentum');
+        if (mm) { mm.textContent = pct + '%'; document.getElementById('metric-momentum-sub').textContent = wk.length ? (wk.filter(x=>x.done).length + ' of ' + wk.length + ' weekly objectives done') : 'shared goals in progress'; }
+      } catch (e) {}
+      const formed = Number(localStorage.getItem('team_formed_ts') || 0);
+      const ms = document.getElementById('metric-streak');
+      if (ms) ms.textContent = formed ? Math.max(1, Math.ceil((Date.now() - formed) / 864e5)) + ' DAYS' : 'NEW';
+    }
+    renderMetrics();
+    document.addEventListener('lifeIsShortDataReady', renderMetrics);
+  </script>
+
+  <dialog id="password-dialog" class="auth-password-dialog">
+    <form class="auth-form" id="password-form" novalidate>
+      <h2>Update password</h2>
+      <p class="auth-password-warning">Please save your password somewhere else too. This site does not offer password recovery.</p>
+      <label for="current-password">Current password</label>
+      <input id="current-password" type="password" autocomplete="current-password" required>
+      <label for="new-password">New password</label>
+      <input id="new-password" type="password" autocomplete="new-password" minlength="6" required>
+      <label for="confirm-password">Confirm new password</label>
+      <input id="confirm-password" type="password" autocomplete="new-password" minlength="6" required>
+      <p class="auth-error" id="password-error" role="alert"></p>
+      <button type="submit" class="auth-button auth-button-primary" id="password-submit">Update password</button>
+      <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
+    </form>
+  </dialog>
+</body>
+</html>

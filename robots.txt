@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://you-are-amazing.github.io/infinite/sitemap.xml
