@@ -16,7 +16,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
   <script src="static/js/auth.js?v=6" defer></script>
   <script src="static/js/sticky-notes.js?v=2" defer></script>
-  <script src="static/js/dashboard.js?v=4" defer></script>
+  <script src="static/js/dashboard.js?v=5" defer></script>
   <script src="static/js/inspire.js?v=3" defer></script>
 </head>
 <body>
@@ -172,20 +172,16 @@
           <div class="v-head"><span class="v-dot" style="background:var(--lav)"></span><span class="v-name">THIS WEEK</span><span class="v-meta" id="weekly-meta">W– FOCUS</span></div>
           <div class="v-list" id="weekly-list"></div>
           <div class="v-add"><input type="text" id="weekly-input" placeholder="Add a weekly goal..." maxlength="120"><button type="button" id="weekly-add" aria-label="Add weekly goal">+</button></div>
-          <div class="v-progress"><div class="pnum"><b id="weekly-pct">0%</b> READY</div><div class="v-bar"><i id="weekly-bar"></i></div></div>
-          <div class="v-foot" id="weekly-foot">0 OF 0 GOALS DONE</div>
         </div>
         <div class="vector-col">
           <div class="v-head"><span class="v-dot" style="background:var(--amber)"></span><span class="v-name">THIS MONTH</span><span class="v-meta" id="monthly-meta">—</span></div>
           <div class="v-list" id="monthly-list"></div>
           <div class="v-add"><input type="text" id="monthly-input" placeholder="Add a monthly goal..." maxlength="120"><button type="button" id="monthly-add" aria-label="Add monthly goal">+</button></div>
-          <div class="v-foot">FINISH BY MONTH END</div>
         </div>
         <div class="vector-col">
           <div class="v-head"><span class="v-dot" style="background:var(--red)"></span><span class="v-name">THIS YEAR</span><span class="v-meta" id="yearly-meta">GOALS</span></div>
           <div class="v-list" id="yearly-list"></div>
           <div class="v-add"><input type="text" id="yearly-input" placeholder="Add a yearly goal..." maxlength="120"><button type="button" id="yearly-add" aria-label="Add yearly goal">+</button></div>
-          <div class="v-foot">YEARLY GOALS</div>
         </div>
       </div>
 
