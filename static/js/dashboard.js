@@ -1,43 +1,53 @@
-/* Infinite dashboard logic — progress, goals, life sheet, daily quote. */
+/* Infinite dashboard logic — progress, goals, life sheet, daily quote.
+   FIX (2026-09-29): year/month/week/quarter percentages now count the current
+   day as elapsed (day-of-year/365 etc.), matching the elapsed/remaining day
+   counters. The "pace" stat is now a true ratio of actual time passed vs the
+   calendar-day average, so it reads ~1.00x of average instead of 8.93x. */
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const QUARTERS = ['Q1 / SPRING','Q2 / SUMMER','Q3 / AUTUMN','Q4 / WINTER'];
+  const daysWord = (n) => (n === 1 ? ' Day' : ' Days');
 
   /* ---------------- time engine ---------------- */
   function yearInfo(now) {
     const start = new Date(now.getFullYear(), 0, 1);
     const end = new Date(now.getFullYear() + 1, 0, 1);
-    const pct = ((now - start) / (end - start)) * 100;
-    const elapsed = Math.floor((now - start) / 864e5) + 1;
     const total = Math.round((end - start) / 864e5);
     const dayOfYear = Math.floor((now - start) / 864e5) + 1;
-    return { pct, elapsed, left: total - elapsed, total, dayOfYear };
+    const pct = (dayOfYear / total) * 100;              // current day counts as elapsed
+    const elapsed = dayOfYear;
+    const left = total - elapsed;
+    const fracDays = (now - start) / 864e5;             // continuous, for pace only
+    const pace = fracDays / (dayOfYear - 0.5);          // vs. midpoint of the current day
+    return { pct, elapsed, left, total, dayOfYear, pace };
   }
   function monthInfo(now) {
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const pct = ((now - start) / (end - start)) * 100;
     const total = Math.round((end - start) / 864e5);
-    const elapsed = Math.floor((now - start) / 864e5) + 1;
+    const dayOfMonth = now.getDate();                   // current day counts as elapsed
+    const pct = (dayOfMonth / total) * 100;
+    const elapsed = dayOfMonth;
+    const left = total - elapsed;
     const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    return { pct, elapsed, left: total - elapsed, total, name: MONTHS[now.getMonth()], nextName: MONTHS[next.getMonth()] };
+    return { pct, elapsed, left, total, name: MONTHS[now.getMonth()], nextName: MONTHS[next.getMonth()] };
   }
   function weekInfo(now) {
     const day = now.getDay();
     const sinceMon = (day + 6) % 7;
-    const monday = new Date(now); monday.setDate(now.getDate() - sinceMon); monday.setHours(0,0,0,0);
-    const next = new Date(monday); next.setDate(monday.getDate() + 7);
-    const pct = ((now - monday) / (next - monday)) * 100;
-    const elapsed = Math.min(7, Math.floor((now - monday) / 864e5) + 1);
+    const dayIndex = sinceMon + 1;                      // Monday = 1 ... Sunday = 7
+    const pct = (dayIndex / 7) * 100;
+    const elapsed = dayIndex;
+    const left = 7 - dayIndex;
     // ISO week number
     const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
     const dayNum = d.getUTCDay() || 7;
     d.setUTCDate(d.getUTCDate() + 4 - dayNum);
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
     const week = Math.ceil((((d - yearStart) / 864e5) + 1) / 7);
-    return { pct, elapsed, left: 7 - elapsed, num: week };
+    return { pct, elapsed, left, num: week };
   }
 
   function setDonut(circleEl, valEl, pct, color) {
@@ -61,7 +71,7 @@
     $('hero-pct').textContent = y.pct.toFixed(2) + '%';
     $('hero-elapsed').textContent = y.elapsed;
     $('hero-left').textContent = y.left;
-    $('hero-velocity').textContent = (y.pct / 100 * 12).toFixed(2) + '×';
+    $('hero-velocity').textContent = y.pace.toFixed(2) + '×';   // FIX: was pct/100*12 (=8.93x)
 
     $('yt-fill').style.width = y.pct + '%';
     $('yt-badge').textContent = y.pct.toFixed(2) + '%';
@@ -79,18 +89,17 @@
       ticks.appendChild(t);
     }
 
-    // quarters
+    // quarters — count the current day (Q3 on Sep 29 = 91/92, not 98%)
     const qWrap = $('quarters');
     qWrap.innerHTML = '';
     for (let q = 0; q < 4; q++) {
       const qs = new Date(now.getFullYear(), q * 3, 1);
       const qe = new Date(now.getFullYear(), q * 3 + 3, 1);
       const qTotal = Math.round((qe - qs) / 864e5);
-      let qPct, state;
-      if (now < qs) { qPct = 0; state = ''; }
-      else if (now >= qe) { qPct = 100; state = 'done'; }
-      else { qPct = ((now - qs) / (qe - qs)) * 100; state = 'active'; }
-      const qElapsed = Math.min(qTotal, Math.max(0, Math.floor((now - qs) / 864e5) + 1));
+      let qPct, qElapsed, state;
+      if (now < qs) { qPct = 0; qElapsed = 0; state = ''; }
+      else if (now >= qe) { qPct = 100; qElapsed = qTotal; state = 'done'; }
+      else { qElapsed = Math.floor((now - qs) / 864e5) + 1; qPct = (qElapsed / qTotal) * 100; state = 'active'; }
       const card = document.createElement('div');
       card.className = 'q-card ' + state;
       card.innerHTML =
@@ -109,14 +118,17 @@
     $('cad-year-name').textContent = 'Year ' + now.getFullYear();
     $('y-elapsed').textContent = y.elapsed;
     $('y-left').textContent = y.left;
+    $('y-left').nextSibling.textContent = daysWord(y.left);      // "1 Day" not "1 Days"
     $('y-weeks').textContent = Math.floor(y.dayOfYear / 7) + ' WEEKS DONE';
     $('cad-month-name').textContent = m.name + ' Finale';
     $('m-elapsed').textContent = m.elapsed;
     $('m-left').textContent = m.left;
+    $('m-left').nextSibling.textContent = daysWord(m.left);
     $('m-next').textContent = m.nextName.toUpperCase() + ' STARTS NEXT';
     $('cad-week-name').textContent = 'Week ' + w.num + ' / 52';
     $('w-elapsed').textContent = w.elapsed;
     $('w-left').textContent = w.left;
+    $('w-left').nextSibling.textContent = daysWord(w.left);
     $('w-dayname').textContent = now.toLocaleDateString(undefined, { weekday: 'long' });
     $('monthly-meta').textContent = m.name.toUpperCase() + ' GOALS';
     $('weekly-meta').textContent = 'WEEK ' + w.num + '';
@@ -240,7 +252,6 @@
     const d = goals.filter(g => g.goal_type === 'daily');
     $('daily-count').textContent = d.filter(g => g.done).length + '/' + d.length + ' DONE';
     const wk = goals.filter(g => g.goal_type === 'weekly');
-    const wDone = wk.filter(g => g.done).length;
     const we = goals.filter(g => g.goal_type === 'weekly' && g.done).length;
     $('w-done-count').textContent = we + ' OF ' + wk.length + ' COMPLETED';
     const now = new Date();
@@ -254,25 +265,32 @@
   const SHEET_ACTIVE_KEY = 'life_sheet_active_index';
   const SHEET_COLORS = ['#1c2b3a','#16332a','#3a2b16','#2b1c3a','#0f3d4a','#3a1616','#223047','#1f2937'];
 
-  function defaultSheets() {
-    return [
-      { name: 'Life Sheet 1', data: Array.from({ length: 5 }, () => ['','','','','']), rowColors: [], colColors: [], cellColors: [] },
-      { name: 'Reading List (' + new Date().getFullYear() + ')', data: [['','',''],['','',''],['','','']], rowColors: [], colColors: [], cellColors: [] },
-      { name: 'Health Habits', data: [['','',''],['','','']], rowColors: [], colColors: [], cellColors: [] }
-    ];
+  function blankSheet(name) {
+    return { name: name, data: Array.from({ length: 3 }, () => ['', '', '']), headers: [], rowColors: [], colColors: [], cellColors: [] };
   }
+  // A fresh, empty sheet: people build their own table with + Row / + Col / + Sheet.
+  function defaultSheets() { return [blankSheet('Life Sheet 1')]; }
+  const isEmptySheet = (sh) => Array.isArray(sh && sh.data) && sh.data.every(r => Array.isArray(r) && r.every(c => !String(c == null ? '' : c).trim()))
+    && !(sh.headers || []).some(h => h && String(h).trim())
+    && !(sh.rowColors || []).some(Boolean) && !(sh.colColors || []).some(Boolean)
+    && !(sh.cellColors || []).some(r => Array.isArray(r) && r.some(Boolean));
+  const isPresetName = (n) => /^Reading List \(\d{4}\)$/.test(n || '') || n === 'Health Habits';
   function normSheets() {
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(SHEET_KEY) || 'null'); } catch (e) {}
     if (!Array.isArray(saved) || !saved.length) return defaultSheets();
-    // Clear the old built-in sample rows if the person never edited them.
     const SAMPLES = ['Deep Work: 4hr Daily Focus Block', 'Study: 4 hours of focused work'];
     if (saved[0] && Array.isArray(saved[0].data) && saved[0].data[0] && SAMPLES.includes(saved[0].data[0][0])) {
       saved[0].data = defaultSheets()[0].data;
       saved[0].rowColors = []; saved[0].colColors = []; saved[0].cellColors = [];
     }
+    // Drop the old built-in example sheets if the person never wrote in them.
+    saved = saved.filter(sh => !(sh && isPresetName(sh.name) && isEmptySheet(sh)));
+    saved = saved.map(sh => (sh && sh.name === 'Life Sheet 1' && isEmptySheet(sh) && sh.data.length === 5) ? blankSheet('Life Sheet 1') : sh);
+    if (!saved.length) return defaultSheets();
     return saved.map((s, i) => ({
       name: (s && typeof s.name === 'string' && s.name.trim()) ? s.name : 'Sheet ' + (i + 1),
+      headers: Array.isArray(s.headers) ? s.headers.map(h => String(h == null ? '' : h)) : [],
       data: (Array.isArray(s.data) && s.data.length ? s.data : [['','','']]).map(r => Array.isArray(r) ? r.map(c => String(c == null ? '' : c)) : ['']),
       rowColors: Array.isArray(s.rowColors) ? s.rowColors : [],
       colColors: Array.isArray(s.colColors) ? s.colColors : [],
@@ -300,7 +318,7 @@
     return (0.2126*r + 0.7152*g + 0.0722*b) / 255 > 0.6;
   }
 
-  let colorTarget = null; // {type:'cell'|'row'|'col', r, c, anchor}
+  let colorTarget = null;
 
   function renderSheetTabs() {
     const sheets = normSheets();
@@ -333,8 +351,7 @@
     const sheet = sheets[ai] || sheets[0];
     const table = $('life-sheet');
     table.innerHTML = '';
-    const cols = Math.max(3, ...sheet.data.map(r => r.length));
-    const labels = ['A · HABIT / GOAL','B · CATEGORY','C · HOW OFTEN','D · SUCCESS RATE','E · STATUS'];
+    const cols = Math.max(1, ...sheet.data.map(r => r.length));
 
     const thead = document.createElement('thead');
     const hr = document.createElement('tr');
@@ -344,16 +361,21 @@
       const colColor = sheet.colColors[c] || '';
       if (colColor) { th.style.background = colColor; th.style.color = isLightColor(colColor) ? '#1a2233' : '#e9eff7'; }
       th.innerHTML = '';
-      const span = document.createElement('span'); span.textContent = labels[c] || String.fromCharCode(65 + c);
+      const inner = document.createElement('div'); inner.className = 'th-inner';
+      const span = document.createElement('span'); span.className = 'lhead';
+      span.contentEditable = 'true'; span.spellcheck = false;
+      span.dataset.c = c; span.dataset.ph = String.fromCharCode(65 + (c % 26));
+      span.textContent = (sheet.headers && sheet.headers[c]) || '';
       const tools = document.createElement('span'); tools.className = 'cell-tools';
       const dot = document.createElement('button');
-      dot.className = 'cell-dot'; dot.title = 'Colour column';
+      dot.type = 'button'; dot.className = 'cell-dot'; dot.title = 'Colour column';
       dot.addEventListener('click', (e) => { e.stopPropagation(); openColorPop({ type: 'col', c, anchor: dot }); });
       const del = document.createElement('button');
-      del.className = 'cell-dot'; del.title = 'Delete column'; del.style.background = 'transparent'; del.textContent = '×'; del.style.color = '#f26d6d'; del.style.border = '1px solid var(--line)';
+      del.type = 'button'; del.className = 'cell-x'; del.title = 'Delete column'; del.setAttribute('aria-label', 'Delete column'); del.textContent = '×';
       del.addEventListener('click', (e) => { e.stopPropagation(); delCol(c); });
       tools.appendChild(dot); tools.appendChild(del);
-      th.appendChild(tools); th.appendChild(span);
+      inner.appendChild(span); inner.appendChild(tools);
+      th.appendChild(inner);
       hr.appendChild(th);
     }
     thead.appendChild(hr); table.appendChild(thead);
@@ -365,13 +387,14 @@
       const rowColor = sheet.rowColors[r] || '';
       if (rowColor) { th.style.background = rowColor; th.style.color = isLightColor(rowColor) ? '#1a2233' : '#e9eff7'; }
       const rh = document.createElement('div'); rh.className = 'row-head';
+      const num = document.createElement('span'); num.className = 'row-num'; num.textContent = String(r + 1);
       const dot = document.createElement('button');
-      dot.className = 'cell-dot'; dot.title = 'Colour row';
+      dot.type = 'button'; dot.className = 'cell-dot'; dot.title = 'Colour row';
       dot.addEventListener('click', (e) => { e.stopPropagation(); openColorPop({ type: 'row', r, anchor: dot }); });
       const del = document.createElement('button');
-      del.className = 'cell-dot'; del.title = 'Delete row'; del.style.background = 'transparent'; del.textContent = '×'; del.style.color = '#f26d6d'; del.style.border = '1px solid var(--line)';
+      del.type = 'button'; del.className = 'cell-x'; del.title = 'Delete row'; del.setAttribute('aria-label', 'Delete row'); del.textContent = '×';
       del.addEventListener('click', (e) => { e.stopPropagation(); delRow(r); });
-      rh.appendChild(dot); rh.appendChild(del);
+      rh.appendChild(num); rh.appendChild(dot); rh.appendChild(del);
       th.appendChild(rh);
       tr.appendChild(th);
       for (let c = 0; c < cols; c++) {
@@ -412,7 +435,7 @@
 
   function addRow() {
     const sheets = normSheets(); const ai = activeSheetIndex(); const s = sheets[ai];
-    const cols = Math.max(3, ...s.data.map(r => r.length));
+    const cols = Math.max(1, ...s.data.map(r => r.length));
     s.data.push(Array(cols).fill(''));
     saveSheets(sheets); renderSheet();
   }
@@ -433,15 +456,16 @@
   function delCol(c) {
     const sheets = normSheets(); const ai = activeSheetIndex(); const s = sheets[ai];
     if (s.data[0].length <= 1) return;
-    if (!window.confirm('Delete column ' + String.fromCharCode(65 + c) + '?')) return;
+    if (!window.confirm('Delete column ' + ((s.headers && s.headers[c]) || String.fromCharCode(65 + c)) + '?')) return;
     s.data.forEach(r => r.splice(c, 1));
     if (Array.isArray(s.colColors)) s.colColors.splice(c, 1);
+    if (Array.isArray(s.headers)) s.headers.splice(c, 1);
     if (Array.isArray(s.cellColors)) s.cellColors.forEach(rc => rc.splice(c, 1));
     saveSheets(sheets); renderSheet();
   }
   function addSheet() {
     const sheets = normSheets();
-    sheets.push({ name: 'Sheet ' + (sheets.length + 1), data: [['','',''],['','',''],['','','']], rowColors: [], colColors: [], cellColors: [] });
+    sheets.push(blankSheet('Sheet ' + (sheets.length + 1)));
     saveSheets(sheets);
     localStorage.setItem(SHEET_ACTIVE_KEY, String(sheets.length - 1));
     renderSheetTabs(); renderSheet();
@@ -542,7 +566,17 @@
       const t = e.target;
       if (t.classList && t.classList.contains('lcell')) {
         updateCell(Number(t.dataset.r), Number(t.dataset.c), t.textContent || '');
+      } else if (t.classList && t.classList.contains('lhead')) {
+        const sheets = normSheets(); const sh = sheets[activeSheetIndex()]; if (!sh) return;
+        const c = Number(t.dataset.c);
+        while (sh.headers.length <= c) sh.headers.push('');
+        sh.headers[c] = (t.textContent || '').replace(/\n/g, ' ');
+        saveSheets(sheets);
       }
+    });
+    // Enter in a column title just confirms it (no line breaks in headers).
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('lhead')) { e.preventDefault(); e.target.blur(); }
     });
     document.addEventListener('click', (e) => {
       const pop = $('sheet-color-pop');

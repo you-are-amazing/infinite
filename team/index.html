@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Team Goals - Infinite</title>
-  <meta name="description" content="Track goals together with your team: shared goals, chat, and kudos.">
+  <meta name="description" content="Create or join a team, share goals, chat and cheer each other on.">
   <link rel="icon" href="../deserve.png" type="image/png">
-  <link rel="stylesheet" href="../static/css/style.css?v=19">
+  <link rel="stylesheet" href="../static/css/style.css?v=24">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
-  <script src="../static/js/auth.js?v=6" defer></script>
+  <script src="../static/js/auth.js?v=7" defer></script>
   <script src="../static/js/team.js?v=3" defer></script>
 </head>
 <body>
@@ -30,11 +30,7 @@
       <a class="nav-item active" href="./"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
     </nav>
     <div class="side-foot">
-      <div class="cad-mini">
-        <div class="lbl"><span>COHORTS</span><b>TEAMS</b></div>
-        <div class="team-list-wrap" id="team-list"><div class="empty-hint" style="padding:8px 12px;">Sign in to see your teams.</div></div>
-      </div>
-      <div class="sync-row"><span class="sync-dot"></span><span>REALTIME · FIRESTORE</span></div>
+      <div class="sync-row"><span class="sync-dot"></span><span id="tm-sync">SYNCED · CLOUD</span></div>
       <div class="user-chip">
         <div class="avatar" id="user-initial">?</div>
         <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
@@ -48,164 +44,137 @@
       <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
       <div class="top-actions">
         <div id="auth-account-actions" class="auth-account-actions" hidden></div>
-        <span class="cloud-pill"><i class="fa-solid fa-cloud"></i>Cloud Synced</span>
       </div>
     </div>
 
     <div class="page page-wide">
-      <!-- Signed-out state -->
-      <div class="no-auth-state" id="no-auth-state" hidden>
-        <i class="fa-solid fa-user-lock"></i>
-        <h2>Sign in to run with a cohort</h2>
-        <p>Teams are shared with other people, so you need an account (guest mode stays local to this browser and can't sync).</p>
-        <form id="team-auth-form">
-          <div id="team-auth-name-wrap" hidden><input id="team-auth-name" type="text" placeholder="Your name" autocomplete="name"></div>
+      <div class="page-head">
+        <div>
+          <div class="kicker"><span class="dot"></span>SHARED GOALS · LIVE CHAT · WINS</div>
+          <h1 class="page-title">Team Goals</h1>
+          <div class="page-sub">WORK WITH FRIENDS · EVERYONE SEES PROGRESS IN REAL TIME</div>
+        </div>
+        <div class="head-actions">
+          <button type="button" id="create-team-btn" class="btn btn-green"><i class="fa-solid fa-plus"></i>Create team</button>
+          <button type="button" id="join-team-btn" class="btn"><i class="fa-solid fa-right-to-bracket"></i>Join with code</button>
+        </div>
+      </div>
+
+      <!-- My teams strip -->
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+        <div id="team-list" style="display:flex; gap:8px; flex-wrap:wrap; flex:1; min-width:0;">
+          <div class="empty-list">Sign in to see your teams.</div>
+        </div>
+      </div>
+
+      <!-- Signed out -->
+      <div id="no-auth-state" class="no-auth-state" hidden>
+        <i class="fa-solid fa-lock"></i>
+        <h2>Sign in to use teams</h2>
+        <p>Team goals, chat and rewards are shared between real accounts, so guest mode can't be used here.</p>
+        <form id="team-auth-form" novalidate>
+          <div id="team-auth-name-wrap" hidden>
+            <input id="team-auth-name" type="text" placeholder="Your name" autocomplete="name">
+          </div>
           <input id="team-auth-email" type="email" placeholder="Email" autocomplete="email" required>
-          <input id="team-auth-password" type="password" placeholder="Password" autocomplete="current-password" minlength="6" required>
+          <input id="team-auth-password" type="password" placeholder="Password (6+ characters)" autocomplete="current-password" minlength="6" required>
           <p class="form-error" id="team-auth-error"></p>
-          <button type="submit" class="btn btn-lav" id="team-auth-submit" style="justify-content:center;">Sign in</button>
+          <button id="team-auth-submit" type="submit" class="auth-button auth-button-primary">Sign in</button>
           <button type="button" class="auth-toggle" id="team-auth-toggle">Don't have an account? Sign up</button>
         </form>
       </div>
 
-      <div class="no-team-state" id="no-team-state" hidden>
-        <i class="fa-solid fa-users"></i>
-        <h2>No cohort selected</h2>
-        <p>Create a team for you and your friends, or join one with an invite code.</p>
+      <!-- Signed in, no team selected -->
+      <div id="no-team-state" class="no-team-state" hidden>
+        <i class="fa-solid fa-people-group"></i>
+        <h2>No team yet</h2>
+        <p>Create a team and invite friends with a 6-letter code, or join a friend's team with theirs.</p>
+        <p style="font-size:12.5px; color:var(--faint);">Use the <b style="color:var(--text);">Create team</b> or <b style="color:var(--text);">Join with code</b> buttons at the top right to get started.</p>
       </div>
 
       <!-- Team content -->
       <div id="team-content" hidden>
         <div class="team-head">
           <div>
-            <div class="team-name"><i class="fa-solid fa-bolt"></i><span id="team-name">Sprint Team</span></div>
-            <div class="team-sub" id="team-sub">MEMBERS</div>
+            <div class="team-name"><i class="fa-solid fa-users"></i><span id="team-name">Team</span></div>
+            <div class="team-sub" id="team-sub">0 MEMBERS</div>
           </div>
-          <div class="invite-chip">
-            <i class="fa-solid fa-key"></i> INVITE: <code id="team-invite-code">------</code>
-            <button type="button" id="copy-invite-btn" title="Copy invite code"><i class="fa-regular fa-copy"></i></button>
+          <div class="member-avatars" id="member-avatars"></div>
+          <div class="invite-chip">INVITE <code id="team-invite-code">------</code>
+            <button type="button" id="copy-invite-btn" title="Copy invite code" aria-label="Copy invite code"><i class="fa-regular fa-copy"></i></button>
           </div>
           <div class="team-head-actions">
-            <div class="member-avatars" id="member-avatars"></div>
-            <button class="btn btn-green" id="create-team-btn" type="button"><i class="fa-solid fa-plus"></i>New Team</button>
-            <button class="btn" id="join-team-btn" type="button"><i class="fa-solid fa-right-to-bracket"></i>Join Code</button>
+            <button type="button" id="leave-team-btn" class="btn btn-quiet"><i class="fa-solid fa-arrow-right-from-bracket"></i>Leave team</button>
           </div>
         </div>
 
-        <div class="metrics">
+        <div class="metrics" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">
           <div class="metric-card">
-            <div class="ml"><i class="fa-solid fa-arrow-trend-up"></i>TEAM MOMENTUM</div>
-            <div class="mv" id="metric-momentum">—</div>
-            <div class="ms" id="metric-momentum-sub">shared goals in progress</div>
+            <div class="ml"><i class="fa-solid fa-users"></i>MEMBERS</div>
+            <div class="mv" id="members-count">0</div>
+            <div class="ms">holding each other accountable</div>
           </div>
           <div class="metric-card">
-            <div class="ml"><i class="fa-regular fa-clock"></i>ACTIVE SYNC SPRINT</div>
-            <div class="mv amber" id="metric-week">—</div>
-            <div class="ms" id="metric-week-sub">of the 52-week year</div>
+            <div class="ml"><i class="fa-solid fa-bullseye"></i>GOALS</div>
+            <div class="mv amber" id="goals-count">0</div>
+            <div class="ms">team + personal, live sync</div>
           </div>
           <div class="metric-card">
-            <div class="ml"><i class="fa-regular fa-hourglass-half"></i>COHORT STREAK</div>
-            <div class="mv lav" id="metric-streak">—</div>
-            <div class="ms">days since the team was formed</div>
-          </div>
-          <div class="metric-card">
-            <div class="ml"><i class="fa-solid fa-fire"></i>KUDOS CIRCULATED</div>
-            <div class="mv" id="metric-kudos">0</div>
-            <div class="ms" id="metric-kudos-sub">cheers given across the cohort</div>
+            <div class="ml"><i class="fa-solid fa-comments"></i>CHAT</div>
+            <div class="mv lav">LIVE</div>
+            <div class="ms">cheer each other on →</div>
           </div>
         </div>
 
-        <div class="team-cols">
-          <div>
-            <div class="team-tabs">
-              <button class="team-tab active" data-tab="goals" type="button"><i class="fa-solid fa-bullseye"></i>Goals &amp; Execution <span class="cnt" id="goals-count">0</span></button>
-              <button class="team-tab" data-tab="chat" type="button"><i class="fa-regular fa-comments"></i>Team Comms <span class="new">WIRE</span></button>
-              <button class="team-tab" data-tab="rewards" type="button"><i class="fa-solid fa-trophy"></i>Kudos &amp; Wall of Wins</button>
-              <button class="team-tab" data-tab="members" type="button"><i class="fa-solid fa-users-gear"></i>Cohort Roster <span class="cnt" id="members-count">0</span></button>
-            </div>
+        <div class="team-tabs">
+          <button type="button" class="team-tab active" data-tab="goals"><i class="fa-solid fa-bullseye"></i>Goals</button>
+          <button type="button" class="team-tab" data-tab="rewards"><i class="fa-solid fa-trophy"></i>Wins</button>
+          <button type="button" class="team-tab" data-tab="members"><i class="fa-solid fa-user-group"></i>Members</button>
+        </div>
 
-            <div id="tab-goals">
-              <div class="panel">
-                <div class="section-head" style="margin:0 0 13px;">
-                  <h2 style="font-size:14px;"><i class="fa-solid fa-bullseye" style="color:var(--green); margin-right:8px;"></i>Add a New Goal</h2>
-                  <span class="mini-link">MAKE TODAY COUNT</span>
-                </div>
-                <div class="commit-row">
-                  <input type="text" id="goal-title-input" placeholder="e.g. Finish one course chapter" maxlength="140">
-                  <select id="goal-cadence-select">
-                    <option value="daily">Repeat: Daily</option>
-                    <option value="weekly">Repeat: Weekly</option>
-                    <option value="yearly">Repeat: Yearly</option>
-                  </select>
-                  <select id="goal-type-select">
-                    <option value="team">Team Collective (Everyone)</option>
-                    <option value="self">Personal Dispatch (Self)</option>
-                  </select>
-                  <button class="btn btn-lav" id="add-goal-btn" type="button"><i class="fa-solid fa-paper-plane"></i>Deploy</button>
-                </div>
-                <div class="section-head" style="margin:6px 0 11px;">
-                  <h2 style="font-size:14px;"><i class="fa-solid fa-diagram-project" style="color:var(--lav); margin-right:8px;"></i>Team Shared Goals</h2>
-                  <span class="mini-link">ALL PARTICIPANTS</span>
-                </div>
-                <div id="goals-list"></div>
-              </div>
-            </div>
-
-            <div id="tab-chat" hidden>
-              <div class="panel">
-                <div class="section-head" style="margin:0 0 12px;">
-                  <h2 style="font-size:14px;"><i class="fa-regular fa-comments" style="color:var(--amber); margin-right:8px;"></i>Team Comms</h2>
-                  <span class="mini-link">LIVE WIRE ON THE RIGHT →</span>
-                </div>
-                <p style="color:var(--muted); font-size:12.5px;">The Cohort Wire panel on the right is the live team feed — it updates in real time and stays open whichever tab you pick.</p>
-              </div>
-            </div>
-
-            <div id="tab-rewards" hidden>
-              <div class="panel">
-                <div class="section-head" style="margin:0 0 12px;">
-                  <h2 style="font-size:14px;"><i class="fa-solid fa-trophy" style="color:var(--amber); margin-right:8px;"></i>Streak Hall &amp; Kudos Feed</h2>
-                  <span class="mini-link">PEER RECOGNITION</span>
-                </div>
-                <div class="commit-row">
-                  <input type="text" id="reward-title-input" placeholder="e.g. Finished a full week streak" maxlength="140">
-                  <button class="btn btn-lav" id="add-reward-btn" type="button"><i class="fa-solid fa-plus"></i>Post Win</button>
-                </div>
-                <div id="rewards-list"></div>
-              </div>
-            </div>
-
-            <div id="tab-members" hidden>
-              <div class="panel">
-                <div class="section-head" style="margin:0 0 6px;">
-                  <h2 style="font-size:14px;"><i class="fa-solid fa-users-gear" style="color:var(--lav); margin-right:8px;"></i>Cohort Roster</h2>
-                </div>
-                <div id="members-list"></div>
-                <div class="section-head" style="margin:18px 0 10px;"><h2 style="font-size:13px;">DANGER ZONE</h2></div>
-                <button class="btn" id="leave-team-btn" type="button"><i class="fa-solid fa-door-open"></i>Leave this team</button>
-              </div>
-            </div>
+        <div id="tab-goals" class="panel">
+          <div class="commit-row">
+            <input type="text" id="goal-title-input" maxlength="140" placeholder="Add a goal — e.g. 'Everyone runs 5k this week'…">
+            <select id="goal-type-select" aria-label="Goal type">
+              <option value="team">Team goal</option>
+              <option value="self">My goal</option>
+            </select>
+            <select id="goal-cadence-select" aria-label="Cadence">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+            <button type="button" id="add-goal-btn" class="btn btn-green"><i class="fa-solid fa-plus"></i>Add goal</button>
           </div>
+          <div id="goals-list"><div class="empty-hint">Loading goals…</div></div>
+        </div>
 
-          <div>
-            <div class="panel wire">
-              <div class="wire-head"><span class="live"></span>COHORT WIRE <span class="tag">REALTIME</span></div>
-              <div class="wire-msgs" id="chat-messages"></div>
-              <form class="wire-input" id="chat-form">
-                <input type="text" id="chat-input" placeholder="Message the team or broadcast..." autocomplete="off" maxlength="300">
-                <button type="submit" aria-label="Send"><i class="fa-solid fa-arrow-up"></i></button>
-              </form>
-            </div>
-            <div class="wire-quote">
-              <div class="q">"You could be good today; instead you choose tomorrow."</div>
-              <div class="by">— Marcus Aurelius, Meditations IX.22</div>
-            </div>
+        <div id="tab-rewards" class="panel" hidden>
+          <div class="commit-row">
+            <input type="text" id="reward-title-input" maxlength="140" placeholder="Celebrate a win — e.g. 'Darshan finished the SDET course!'…">
+            <button type="button" id="add-reward-btn" class="btn btn-green"><i class="fa-solid fa-trophy"></i>Post win</button>
           </div>
+          <div id="rewards-list"><div class="empty-hint">Loading wins…</div></div>
+        </div>
+
+        <div id="tab-members" class="panel" hidden>
+          <div id="members-list"><div class="empty-hint">Loading members…</div></div>
         </div>
       </div>
+
+      <!-- Team chat: fixed right-hand panel -->
+      <section class="wire panel" aria-label="Team chat">
+        <div class="wire-head"><span class="live"></span><span id="chat-team-name" class="wire-title">TEAM CHAT</span><span class="tag" id="chat-tag">SHARED · LIVE</span></div>
+        <div class="wire-msgs" id="chat-messages"><div class="nd-empty">Sign in and pick a team to start chatting.</div></div>
+        <form class="wire-input" id="chat-form">
+          <input type="text" id="chat-input" maxlength="300" placeholder="Message your team…" autocomplete="off">
+          <button type="submit" aria-label="Send message"><i class="fa-solid fa-paper-plane"></i></button>
+        </form>
+      </section>
     </div>
   </div>
 
+  <!-- Auth overlay (auth.js) -->
   <div class="auth-overlay" id="auth-overlay" hidden>
     <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
       <div>
@@ -247,50 +216,7 @@
     </section>
   </div>
 
-  <script>
-    // tiny helpers independent of team.js
-    function tickClock() {
-      const n = new Date();
-      const el = document.getElementById('utc-clock');
-      if (el) el.textContent = String(n.getUTCHours()).padStart(2,'0') + ':' + String(n.getUTCMinutes()).padStart(2,'0') + ':' + String(n.getUTCSeconds()).padStart(2,'0') + ' UTC';
-    }
-    setInterval(tickClock, 1000); tickClock();
-
-    function refreshUser() {
-      const name = localStorage.getItem('life_user_name') || (window.lifeIsShortUser && (window.lifeIsShortUser.displayName || window.lifeIsShortUser.email)) || 'Guest';
-      const nm = document.getElementById('user-name'), ini = document.getElementById('user-initial');
-      if (nm) nm.textContent = name;
-      if (ini) ini.textContent = (name || '?').trim().split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
-    }
-    refreshUser();
-    document.addEventListener('lifeIsShortAuthState', refreshUser);
-
-    // Metric cards (static cadence metrics + live counts where available)
-    function renderMetrics() {
-      const now = new Date();
-      const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-      const dayNum = d.getUTCDay() || 7;
-      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-      const ys = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-      const week = Math.ceil((((d - ys) / 864e5) + 1) / 7);
-      const mw = document.getElementById('metric-week');
-      if (mw) { mw.textContent = 'WEEK ' + week; document.getElementById('metric-week-sub').textContent = now.getFullYear() + ' cadence · ' + Math.max(0, 52 - week) + ' weeks left'; }
-      // momentum = % of weekly goals done (personal mirror) or fallback
-      try {
-        const g = JSON.parse(localStorage.getItem('goals') || '[]');
-        const wk = g.filter(x => x.goal_type === 'weekly');
-        const pct = wk.length ? Math.round(wk.filter(x => x.done).length / wk.length * 1000) / 10 : 94.2;
-        const mm = document.getElementById('metric-momentum');
-        if (mm) { mm.textContent = pct + '%'; document.getElementById('metric-momentum-sub').textContent = wk.length ? (wk.filter(x=>x.done).length + ' of ' + wk.length + ' weekly objectives done') : 'shared goals in progress'; }
-      } catch (e) {}
-      const formed = Number(localStorage.getItem('team_formed_ts') || 0);
-      const ms = document.getElementById('metric-streak');
-      if (ms) ms.textContent = formed ? Math.max(1, Math.ceil((Date.now() - formed) / 864e5)) + ' DAYS' : 'NEW';
-    }
-    renderMetrics();
-    document.addEventListener('lifeIsShortDataReady', renderMetrics);
-  </script>
-
+  <!-- Password dialog (auth.js) -->
   <dialog id="password-dialog" class="auth-password-dialog">
     <form class="auth-form" id="password-form" novalidate>
       <h2>Update password</h2>
@@ -306,5 +232,27 @@
       <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
     </form>
   </dialog>
+
+  <script>
+    // Clock + user chip for this page (auth.js handles the account actions).
+    (function () {
+      function tickClock() {
+        const n = new Date();
+        document.getElementById('utc-clock').textContent =
+          String(n.getUTCHours()).padStart(2, '0') + ':' + String(n.getUTCMinutes()).padStart(2, '0') + ':' +
+          String(n.getUTCSeconds()).padStart(2, '0') + ' UTC';
+      }
+      setInterval(tickClock, 1000); tickClock();
+
+      function refreshUser() {
+        const name = localStorage.getItem('life_user_name') ||
+          (window.lifeIsShortUser && (window.lifeIsShortUser.displayName || window.lifeIsShortUser.email)) || 'Guest';
+        document.getElementById('user-name').textContent = name;
+        document.getElementById('user-initial').textContent = (name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+      }
+      refreshUser();
+      document.addEventListener('lifeIsShortAuthState', refreshUser);
+    })();
+  </script>
 </body>
 </html>

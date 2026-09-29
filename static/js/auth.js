@@ -32,6 +32,7 @@ const LIFE_IS_SHORT_DATA_KEYS = [
   'life_highlight_color',
   'life_sticky_notes',
   'life_sticky_glow_enabled',
+  'life_inspire_links',
   'theme'
 ];
 

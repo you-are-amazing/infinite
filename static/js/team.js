@@ -53,6 +53,7 @@
     if (!signedIn) {
       $('no-team-state').hidden = true;
       $('team-content').hidden = true;
+      setChatTitle('');
       $('team-list').innerHTML = '<div class="empty-list">Sign in to see your teams.</div>';
       teardownTeamListeners();
       if (teamsUnsub) { teamsUnsub(); teamsUnsub = null; }
@@ -127,7 +128,13 @@
           list.appendChild(btn);
         });
         if (!currentTeamId || !stillExists) {
-          if (!currentTeamId) selectTeam(snapshot.docs[0].id);
+          if (!currentTeamId) {
+            // Coming from a notification? Open that team first.
+            let want = null;
+            try { want = sessionStorage.getItem('team_open_id'); sessionStorage.removeItem('team_open_id'); } catch (e) {}
+            const hit = want && snapshot.docs.find((d) => d.id === want);
+            selectTeam(hit ? hit.id : snapshot.docs[0].id);
+          }
         }
       }, (error) => {
         console.warn('Unable to load teams', error);
@@ -209,12 +216,21 @@
       });
       currentTeamId = null;
       teardownTeamListeners();
+      setChatTitle('');
       $('team-content').hidden = true;
       $('no-team-state').hidden = false;
     } catch (error) {
       console.error('leaveTeam failed', error);
       alert('Could not leave the team: ' + (error && error.message ? error.message : error));
     }
+  }
+
+  // Chat panel header shows the active group's name.
+  function setChatTitle(name) {
+    const el = document.getElementById('chat-team-name');
+    const tag = document.getElementById('chat-tag');
+    if (el) { el.textContent = name || 'TEAM CHAT'; el.title = name || ''; }
+    if (tag) tag.textContent = name ? 'TEAM CHAT · LIVE' : 'SHARED · LIVE';
   }
 
   // ---------- Selecting a team ----------
@@ -239,6 +255,7 @@
     teamDocUnsub = teamRef.onSnapshot((doc) => {
       if (!doc.exists) {
         currentTeamId = null;
+        setChatTitle('');
         $('team-content').hidden = true;
         $('no-team-state').hidden = false;
         return;
@@ -264,6 +281,7 @@
 
   function renderTeamHeader() {
     $('team-name').textContent = currentTeamData.name || 'Team';
+    setChatTitle(currentTeamData.name || 'Team');
     $('team-invite-code').textContent = currentTeamData.inviteCode || '------';
   }
 
@@ -370,23 +388,6 @@
     });
     const goalsCount = $('goals-count');
     if (goalsCount) goalsCount.textContent = docs.length;
-    // team momentum metric = share of 'done' across all goals
-    let total = 0, done = 0;
-    docs.forEach((d) => {
-      const g = d.data();
-      if (g.type === 'team') {
-        const parts = g.participants || {};
-        total += Object.keys(parts).length;
-        done += Object.values(parts).filter((s) => s === 'done').length;
-      } else {
-        total += 1;
-        if (g.status === 'done') done += 1;
-      }
-    });
-    const mm = $('metric-momentum');
-    if (mm) mm.textContent = (total ? Math.round(done / total * 1000) / 10 : 0) + '%';
-    const mms = $('metric-momentum-sub');
-    if (mms) mms.textContent = done + ' of ' + total + ' milestones cleared';
   }
 
   async function addGoal() {
@@ -439,6 +440,7 @@
     });
   }
 
+
   // ---------- Rewards ----------
 
   function renderRewards(docs) {
@@ -448,7 +450,6 @@
       return;
     }
     list.innerHTML = '';
-    let totalCheers = 0;
     docs.forEach((doc) => {
       const reward = doc.data();
       const cheers = reward.cheers || {};
@@ -463,12 +464,7 @@
         doc.ref.update({ [field]: mine ? firebase.firestore.FieldValue.delete() : true });
       });
       list.appendChild(card);
-      totalCheers += Object.keys(cheers).length;
     });
-    const mk = $('metric-kudos');
-    if (mk) mk.textContent = totalCheers;
-    const mks = $('metric-kudos-sub');
-    if (mks) mks.textContent = totalCheers + ' cheers given across the cohort';
   }
 
   async function addReward() {
@@ -490,7 +486,7 @@
     document.querySelectorAll('.team-tab').forEach((btn) => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.team-tab').forEach((b) => b.classList.remove('active'));
-        ['goals', 'chat', 'rewards', 'members'].forEach((name) => {
+        ['goals', 'rewards', 'members'].forEach((name) => {
           const panel = $('tab-' + name);
           if (panel) panel.hidden = name !== btn.dataset.tab;
         });
@@ -526,6 +522,21 @@
     setupAuthForm();
     setupTabs();
     setupStaticButtons();
+    const syncTopbar = () => {
+      const tb = document.querySelector('.topbar');
+      if (tb) document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
+    };
+    syncTopbar();
+    window.addEventListener('resize', syncTopbar);
+    window.addEventListener('load', syncTopbar);
+    document.addEventListener('lifeIsShortAuthState', () => setTimeout(syncTopbar, 0));
+    const topbarEl = document.querySelector('.topbar');
+    if (topbarEl && window.ResizeObserver) new ResizeObserver(syncTopbar).observe(topbarEl);
+    // The notification bell asks us to open a team.
+    document.addEventListener('teamNotifyOpenTeam', (e) => {
+      const id = e.detail && e.detail.teamId;
+      if (id && currentUser) selectTeam(id);
+    });
     $('team-list').innerHTML = '<div class="empty-list">Loading your teams…</div>';
     let resolved = false;
     const resolve = (user) => { resolved = true; currentUser = user; renderAuthState(); };

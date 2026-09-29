@@ -13,7 +13,7 @@ Live site: https://you-are-amazing.github.io/infinite/
 - **Life Calendar**: see your whole year at a glance.
 - **Notepad & Docs**: rich text notes with highlighting.
 - **Team Goals**: create or join a team with an invite code, share goals, chat and cheer each other on.
-- **Inspire Feed**: motivational news and song previews matched to your goals, updated automatically.
+- **Inspire Feed**: paste any YouTube video or song link under **My Links** and it shows as a clickable thumbnail (click to open on YouTube). Also motivational stories and song previews matched to your goals, updated automatically.
 - **Accounts and cloud sync**: email login with Firebase, or use it as a guest without an account.
 - **Light and dark mode**, responsive on desktop and mobile.
 
