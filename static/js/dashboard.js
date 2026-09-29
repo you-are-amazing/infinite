@@ -241,10 +241,6 @@
     $('daily-count').textContent = d.filter(g => g.done).length + '/' + d.length + ' DONE';
     const wk = goals.filter(g => g.goal_type === 'weekly');
     const wDone = wk.filter(g => g.done).length;
-    const wPct = wk.length ? Math.round(wDone / wk.length * 100) : 0;
-    $('weekly-pct').textContent = wPct + '%';
-    $('weekly-bar').style.width = wPct + '%';
-    $('weekly-foot').textContent = wDone + ' OF ' + wk.length + ' GOALS DONE';
     const we = goals.filter(g => g.goal_type === 'weekly' && g.done).length;
     $('w-done-count').textContent = we + ' OF ' + wk.length + ' COMPLETED';
     const now = new Date();
