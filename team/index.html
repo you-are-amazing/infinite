@@ -6,7 +6,7 @@
   <title>Team Goals - Infinite</title>
   <meta name="description" content="Create or join a team, share goals, chat and cheer each other on.">
   <link rel="icon" href="../deserve.png" type="image/png">
-  <link rel="stylesheet" href="../static/css/style.css?v=24">
+  <link rel="stylesheet" href="../static/css/style.css?v=25">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -15,7 +15,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
   <script src="../static/js/auth.js?v=7" defer></script>
-  <script src="../static/js/team.js?v=3" defer></script>
+  <script src="../static/js/team.js?v=4" defer></script>
+  <script src="../static/js/team-notify.js?v=2" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -164,8 +165,11 @@
 
       <!-- Team chat: fixed right-hand panel -->
       <section class="wire panel" aria-label="Team chat">
-        <div class="wire-head"><span class="live"></span><span id="chat-team-name" class="wire-title">TEAM CHAT</span><span class="tag" id="chat-tag">SHARED · LIVE</span></div>
-        <div class="wire-msgs" id="chat-messages"><div class="nd-empty">Sign in and pick a team to start chatting.</div></div>
+        <div class="wire-head"><span class="live"></span><span id="chat-team-name" class="wire-title">TEAM CHAT</span><span class="tag" id="chat-tag">SHARED · LIVE</span>
+          <button type="button" id="chat-clear-btn" class="wire-clear" title="Clear chat for everyone (owner only)" aria-label="Clear chat" hidden><i class="fa-regular fa-trash-can"></i></button>
+        </div>
+        <div class="wire-msgs" id="chat-messages"><div class="chat-empty">Sign in and pick a team to start chatting.</div></div>
+        <div class="typing-bar" id="typing-bar" aria-live="polite" hidden></div>
         <form class="wire-input" id="chat-form">
           <input type="text" id="chat-input" maxlength="300" placeholder="Message your team…" autocomplete="off">
           <button type="submit" aria-label="Send message"><i class="fa-solid fa-paper-plane"></i></button>

@@ -14,6 +14,8 @@
  *     -- team goals --  participants: { uid: 'pending'|'done' }
  *   teams/{teamId}/messages/{messageId}
  *     senderId, senderName, text, createdAt
+ *   teams/{teamId}/reads/{uid}      -- read receipts: { name, at }  ("seen" = message.createdAt <= at)
+ *   teams/{teamId}/typing/{uid}     -- typing indicator: { name, typing, at }  (deleted when the user stops)
  *   teams/{teamId}/rewards/{rewardId}
  *     title, createdBy, createdByName, createdAt, cheers: { uid: true }
  */
@@ -27,8 +29,29 @@
   let goalsUnsub = null;
   let messagesUnsub = null;
   let rewardsUnsub = null;
+  let readsUnsub = null;
+  let typingUnsub = null;
   let currentTeamData = null;
   let authMode = 'signin';
+
+  // ---- chat state ----
+  const LINK_PREVIEWS = true;     // set false to stop fetching link titles/images from microlink.io / noembed.com
+  const MAX_PREVIEWS = 2;         // link cards shown per message
+  const TYPING_TTL = 6000;        // ms a "typing…" flag lives without a refresh
+  let readsMap = {};              // uid -> ms of last time that member had the chat open
+  let typingMap = {};             // uid -> { name, at(local ms) }
+  let typingFirst = true;
+  let typingInterval = null;
+  let iAmTyping = false;
+  let typingTeamId = null;
+  let lastTypingSent = 0;
+  let stopTypingTimeout = null;
+  let lastMsgDocs = [];
+  let chatInitial = true;
+  let forceScroll = false;
+  let readTimer = null;
+  let lastReadWriteFor = 0;
+  const msgEls = new Map();       // messageId -> element (so updates never rebuild the whole list)
 
   const $ = (id) => document.getElementById(id);
 
@@ -56,6 +79,10 @@
       setChatTitle('');
       $('team-list').innerHTML = '<div class="empty-list">Sign in to see your teams.</div>';
       teardownTeamListeners();
+      currentTeamId = null;
+      window.infiniteActiveTeamId = null;
+      msgEls.clear();
+      $('chat-messages').innerHTML = '<div class="chat-empty">Sign in and pick a team to start chatting.</div>';
       if (teamsUnsub) { teamsUnsub(); teamsUnsub = null; }
       return;
     }
@@ -215,8 +242,10 @@
         [`members.${currentUser.uid}`]: firebase.firestore.FieldValue.delete()
       });
       currentTeamId = null;
+      window.infiniteActiveTeamId = null;
       teardownTeamListeners();
       setChatTitle('');
+      updateChatTools();
       $('team-content').hidden = true;
       $('no-team-state').hidden = false;
     } catch (error) {
@@ -236,6 +265,11 @@
   // ---------- Selecting a team ----------
 
   function teardownTeamListeners() {
+    stopTyping();
+    if (readsUnsub) { readsUnsub(); readsUnsub = null; }
+    if (typingUnsub) { typingUnsub(); typingUnsub = null; }
+    if (typingInterval) { clearInterval(typingInterval); typingInterval = null; }
+    clearTimeout(readTimer);
     if (teamDocUnsub) { teamDocUnsub(); teamDocUnsub = null; }
     if (goalsUnsub) { goalsUnsub(); goalsUnsub = null; }
     if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
@@ -244,8 +278,10 @@
 
   function selectTeam(teamId) {
     if (teamId === currentTeamId) return;
-    currentTeamId = teamId;
     teardownTeamListeners();
+    currentTeamId = teamId;
+    window.infiniteActiveTeamId = teamId;
+    resetChatState();
     $('no-team-state').hidden = true;
     $('team-content').hidden = false;
 
@@ -255,6 +291,7 @@
     teamDocUnsub = teamRef.onSnapshot((doc) => {
       if (!doc.exists) {
         currentTeamId = null;
+        window.infiniteActiveTeamId = null;
         setChatTitle('');
         $('team-content').hidden = true;
         $('no-team-state').hidden = false;
@@ -263,6 +300,7 @@
       currentTeamData = doc.data();
       renderTeamHeader();
       renderMembers();
+      refreshChat();
       Array.from(document.querySelectorAll('.team-item')).forEach((el) => el.classList.remove('active'));
     });
 
@@ -271,8 +309,45 @@
     }, (err) => console.warn('goals listener', err));
 
     messagesUnsub = teamRef.collection('messages').orderBy('createdAt', 'asc').limitToLast(50).onSnapshot((snap) => {
+      // Someone who just sent a message is no longer "typing".
+      snap.docChanges().forEach((c) => {
+        if (c.type === 'added') delete typingMap[c.doc.data().senderId];
+      });
+      renderTyping();
       renderMessages(snap.docs);
     }, (err) => console.warn('messages listener', err));
+
+    // Read receipts: one small doc per member (teams/{id}/reads/{uid}).
+    readsUnsub = teamRef.collection('reads').onSnapshot((snap) => {
+      snap.docChanges().forEach((c) => {
+        if (c.type === 'removed') { delete readsMap[c.doc.id]; return; }
+        const d = c.doc.data({ serverTimestamps: 'estimate' });
+        readsMap[c.doc.id] = d.at && d.at.toMillis ? d.at.toMillis() : 0;
+      });
+      refreshChat();
+    }, (err) => console.warn('reads listener', err));
+
+    // Typing indicator: teams/{id}/typing/{uid} exists only while someone is typing.
+    typingUnsub = teamRef.collection('typing').onSnapshot((snap) => {
+      if (typingFirst) { typingFirst = false; return; }   // ignore stale docs from before we opened the chat
+      snap.docChanges().forEach((c) => {
+        const uid = c.doc.id;
+        if (uid === currentUser.uid) return;
+        const d = c.doc.data() || {};
+        if (c.type === 'removed' || d.typing === false) { delete typingMap[uid]; return; }
+        const member = currentTeamData && currentTeamData.members && currentTeamData.members[uid];
+        typingMap[uid] = { name: (member && member.name) || d.name || 'Someone', at: Date.now() };
+      });
+      renderTyping();
+    }, (err) => console.warn('typing listener', err));
+    typingInterval = setInterval(() => {
+      const now = Date.now();
+      let changed = false;
+      Object.keys(typingMap).forEach((uid) => {
+        if (now - typingMap[uid].at > TYPING_TTL) { delete typingMap[uid]; changed = true; }
+      });
+      if (changed) renderTyping();
+    }, 1000);
 
     rewardsUnsub = teamRef.collection('rewards').orderBy('createdAt', 'desc').onSnapshot((snap) => {
       renderRewards(snap.docs);
@@ -282,6 +357,7 @@
   function renderTeamHeader() {
     $('team-name').textContent = currentTeamData.name || 'Team';
     setChatTitle(currentTeamData.name || 'Team');
+    updateChatTools();
     $('team-invite-code').textContent = currentTeamData.inviteCode || '------';
   }
 
@@ -413,18 +489,415 @@
 
   // ---------- Chat ----------
 
-  function renderMessages(docs) {
-    const wrap = $('chat-messages');
-    wrap.innerHTML = '';
-    docs.forEach((doc) => {
-      const msg = doc.data();
-      const el = document.createElement('div');
-      el.className = 'chat-msg' + (msg.senderId === currentUser.uid ? ' mine' : '');
-      el.innerHTML = `<div class="sender">${escapeHtml(msg.senderName || 'Someone')}</div>${escapeHtml(msg.text)}<div class="time">${formatTime(msg.createdAt)}</div>`;
-      wrap.appendChild(el);
-    });
-    wrap.scrollTop = wrap.scrollHeight;
+  // ----- links: find URLs in a message and turn them into clickable links + preview cards -----
+
+  const URL_RE = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
+  const META_KEY = 'team_link_meta_v1';
+  const metaInflight = new Map();
+
+  function normalizeUrl(s) {
+    try {
+      const u = new URL(/^https?:\/\//i.test(s) ? s : 'https://' + s);
+      if (!/^https?:$/.test(u.protocol) || !u.hostname.includes('.')) return null;
+      return u.href;
+    } catch (e) { return null; }
   }
+
+  // Splits text into [{ text }, { text, href }, ...]
+  function tokenize(text) {
+    const out = [];
+    let last = 0;
+    let m;
+    URL_RE.lastIndex = 0;
+    while ((m = URL_RE.exec(text))) {
+      const trimmed = m[0].replace(/[.,!?;:'")\]]+$/, '');
+      const href = normalizeUrl(trimmed);
+      if (!href) continue;
+      if (m.index > last) out.push({ text: text.slice(last, m.index) });
+      out.push({ text: trimmed, href });
+      last = m.index + trimmed.length;
+      URL_RE.lastIndex = last;
+    }
+    if (last < text.length) out.push({ text: text.slice(last) });
+    return out;
+  }
+
+  function ytId(url) {
+    const m = String(url).match(/(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+
+  function isImageUrl(u) {
+    return /\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(u.pathname);
+  }
+
+  function readMetaCache() {
+    try { return JSON.parse(localStorage.getItem(META_KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function writeMetaCache(cache) {
+    const keys = Object.keys(cache);
+    if (keys.length > 120) keys.slice(0, keys.length - 120).forEach((k) => delete cache[k]);
+    try { localStorage.setItem(META_KEY, JSON.stringify(cache)); } catch (e) {}
+  }
+
+  // Title / image for a link. YouTube -> noembed.com, everything else -> microlink.io (both are free, CORS-enabled).
+  // Results are cached in localStorage, and any failure simply leaves the basic card in place.
+  function getLinkMeta(url, kind) {
+    const cache = readMetaCache();
+    if (cache[url]) return Promise.resolve(cache[url]);
+    if (metaInflight.has(url)) return metaInflight.get(url);
+    const endpoint = kind === 'yt'
+      ? 'https://noembed.com/embed?url=' + encodeURIComponent(url)
+      : 'https://api.microlink.io/?url=' + encodeURIComponent(url);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 7000);
+    const p = fetch(endpoint, { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((j) => {
+        let meta = null;
+        if (kind === 'yt') {
+          if (j && j.title) meta = { title: j.title, site: j.author_name || 'YouTube' };
+        } else if (j && j.status === 'success' && j.data) {
+          const d = j.data;
+          meta = { title: d.title || '', image: (d.image && d.image.url) || '', site: d.publisher || '' };
+        }
+        if (meta) { const c = readMetaCache(); c[url] = meta; writeMetaCache(c); }
+        return meta;
+      })
+      .catch(() => null)
+      .finally(() => { clearTimeout(timer); metaInflight.delete(url); });
+    metaInflight.set(url, p);
+    return p;
+  }
+
+  function mk(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function setBackground(node, url) {
+    if (!/^https?:\/\//i.test(url)) return false;
+    node.style.backgroundImage = 'url("' + url.replace(/["\\\n\r]/g, '') + '")';
+    return true;
+  }
+
+  function buildPreview(url) {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer nofollow';
+
+    // YouTube: thumbnail with a play button (click opens the video on YouTube)
+    const vid = ytId(url);
+    if (vid) {
+      a.className = 'lp lp-yt';
+      const thumb = mk('span', 'lp-thumb');
+      setBackground(thumb, 'https://i.ytimg.com/vi/' + vid + '/hqdefault.jpg');
+      const play = mk('span', 'lp-play');
+      play.innerHTML = '<i class="fa-solid fa-play"></i>';
+      thumb.appendChild(play);
+      const meta = mk('span', 'lp-meta');
+      const title = mk('b', null, 'YouTube video');
+      const sub = mk('em', null, 'youtube.com');
+      meta.append(title, sub);
+      a.append(thumb, meta);
+      if (LINK_PREVIEWS) {
+        getLinkMeta(url, 'yt').then((m) => {
+          if (m && m.title) title.textContent = m.title;
+          if (m && m.site) sub.textContent = m.site + ' · YouTube';
+        });
+      }
+      return a;
+    }
+
+    // Direct image link: show the picture itself
+    if (isImageUrl(u)) {
+      a.className = 'lp lp-img';
+      const img = new Image();
+      img.loading = 'lazy';
+      img.referrerPolicy = 'no-referrer';
+      img.alt = '';
+      img.src = url;
+      img.onerror = () => { a.remove(); };
+      a.appendChild(img);
+      return a;
+    }
+
+    // Any other site: favicon + domain right away, real title/thumbnail when the lookup returns
+    a.className = 'lp lp-site';
+    const thumb = mk('span', 'lp-thumb');
+    thumb.hidden = true;
+    const meta = mk('span', 'lp-meta');
+    const title = mk('b', null, host);
+    const sub = mk('em');
+    const fav = new Image();
+    fav.alt = '';
+    fav.referrerPolicy = 'no-referrer';
+    fav.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(u.hostname) + '&sz=64';
+    fav.onerror = () => { fav.remove(); };
+    sub.append(fav, mk('span', null, host + (u.pathname !== '/' ? u.pathname : '')));
+    meta.append(title, sub);
+    a.append(thumb, meta);
+    if (LINK_PREVIEWS) {
+      getLinkMeta(url, 'site').then((m) => {
+        if (!m) return;
+        if (m.title) title.textContent = m.title;
+        if (m.image && setBackground(thumb, m.image)) thumb.hidden = false;
+      });
+    }
+    return a;
+  }
+
+  // ----- message elements -----
+
+  function isOwner() {
+    return !!(currentUser && currentTeamData && currentTeamData.ownerId === currentUser.uid);
+  }
+
+  function memberName(uid) {
+    const m = currentTeamData && currentTeamData.members && currentTeamData.members[uid];
+    return (m && m.name) || 'Member';
+  }
+
+  function buildMessage(doc) {
+    const msg = doc.data();
+    const mine = msg.senderId === currentUser.uid;
+    const node = mk('div', 'chat-msg' + (mine ? ' mine' : ''));
+    node.dataset.id = doc.id;
+
+    if (!mine) node.appendChild(mk('div', 'sender', msg.senderName || 'Someone'));
+
+    const body = mk('div', 'msg-text');
+    const urls = [];
+    tokenize(msg.text || '').forEach((tok) => {
+      if (tok.href) {
+        const link = mk('a', 'chat-link', tok.text.length > 48 ? tok.text.slice(0, 45) + '…' : tok.text);
+        link.href = tok.href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer nofollow';
+        link.title = tok.href;
+        body.appendChild(link);
+        if (!urls.includes(tok.href)) urls.push(tok.href);
+      } else {
+        body.appendChild(document.createTextNode(tok.text));
+      }
+    });
+    node.appendChild(body);
+
+    if (urls.length) {
+      const wrap = mk('div', 'msg-previews');
+      urls.slice(0, MAX_PREVIEWS).forEach((u) => wrap.appendChild(buildPreview(u)));
+      node.appendChild(wrap);
+      node.classList.add('has-preview');
+    }
+
+    const foot = mk('div', 'msg-foot');
+    foot.append(mk('span', 'time'), mk('span', 'ticks'), mk('span', 'seen-label'));
+    node.appendChild(foot);
+
+    const del = mk('button', 'msg-del');
+    del.type = 'button';
+    del.title = 'Delete message';
+    del.setAttribute('aria-label', 'Delete message');
+    del.innerHTML = '<i class="fa-regular fa-trash-can"></i>';
+    node.appendChild(del);
+    return node;
+  }
+
+  // Time, delivery ticks, "Seen by …" and delete-button visibility — cheap to redo whenever anything changes.
+  function updateMessageMeta(node, doc, isLastMine) {
+    const msg = doc.data({ serverTimestamps: 'estimate' });
+    const mine = msg.senderId === currentUser.uid;
+    node.querySelector('.time').textContent = formatTime(msg.createdAt);
+    node.querySelector('.msg-del').hidden = !(mine || isOwner());
+
+    const ticks = node.querySelector('.ticks');
+    const label = node.querySelector('.seen-label');
+    if (!mine) { ticks.hidden = true; label.hidden = true; return; }
+
+    const ts = msg.createdAt && msg.createdAt.toMillis ? msg.createdAt.toMillis() : 0;
+    const others = Object.keys((currentTeamData && currentTeamData.members) || {}).filter((u) => u !== currentUser.uid);
+    const seen = ts ? others.filter((u) => (readsMap[u] || 0) >= ts) : [];
+    const names = seen.map(memberName);
+
+    let icon = 'fa-solid fa-check';
+    let cls = 'ticks';
+    let title = 'Sent';
+    if (doc.metadata.hasPendingWrites) { icon = 'fa-regular fa-clock'; title = 'Sending…'; }
+    else if (seen.length) {
+      icon = 'fa-solid fa-check-double';
+      title = 'Seen by ' + names.join(', ');
+      if (seen.length === others.length) cls += ' seen';
+    }
+    ticks.hidden = false;
+    ticks.className = cls;
+    ticks.title = title;
+    ticks.innerHTML = '<i class="' + icon + '"></i>';
+
+    if (isLastMine && seen.length && !doc.metadata.hasPendingWrites) {
+      label.hidden = false;
+      label.textContent = seen.length === others.length && others.length === 1
+        ? 'Seen'
+        : 'Seen by ' + (names.length > 2 ? names.slice(0, 2).join(', ') + ' +' + (names.length - 2) : names.join(', '));
+    } else {
+      label.hidden = true;
+    }
+  }
+
+  function renderMessages(docs) {
+    lastMsgDocs = docs;
+    const wrap = $('chat-messages');
+    if (!currentUser) return;
+
+    if (!docs.length) {
+      msgEls.clear();
+      wrap.innerHTML = '<div class="chat-empty">No messages yet. Say hi 👋</div>';
+      updateChatTools();
+      return;
+    }
+    const placeholder = wrap.querySelector('.chat-empty');
+    if (placeholder) placeholder.remove();
+
+    const nearBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 90;
+    const ids = new Set(docs.map((d) => d.id));
+    msgEls.forEach((node, id) => { if (!ids.has(id)) { node.remove(); msgEls.delete(id); } });
+
+    let lastMineId = null;
+    docs.forEach((d) => { if (d.data().senderId === currentUser.uid) lastMineId = d.id; });
+
+    let addedNew = false;
+    let addedOthers = false;
+    docs.forEach((doc, i) => {
+      let node = msgEls.get(doc.id);
+      if (!node) {
+        node = buildMessage(doc);
+        msgEls.set(doc.id, node);
+        addedNew = true;
+        if (doc.data().senderId !== currentUser.uid) addedOthers = true;
+      }
+      updateMessageMeta(node, doc, doc.id === lastMineId);
+      if (wrap.children[i] !== node) wrap.insertBefore(node, wrap.children[i] || null);
+    });
+
+    if (chatInitial || forceScroll || (addedNew && nearBottom)) {
+      wrap.scrollTop = wrap.scrollHeight;
+      // images / link cards load later and grow the bubbles, so stick to the bottom once more
+      setTimeout(() => { if (chatInitial || forceScroll) wrap.scrollTop = wrap.scrollHeight; forceScroll = false; }, 400);
+    }
+    chatInitial = false;
+    updateChatTools();
+    if (addedOthers || addedNew) scheduleMarkRead();
+  }
+
+  // Re-run the render with the docs we already have (team doc / read receipts changed).
+  function refreshChat() {
+    if (currentUser && currentTeamId && lastMsgDocs.length) renderMessages(lastMsgDocs);
+    else updateChatTools();
+  }
+
+  function resetChatState() {
+    readsMap = {};
+    typingMap = {};
+    typingFirst = true;
+    lastMsgDocs = [];
+    chatInitial = true;
+    forceScroll = false;
+    lastReadWriteFor = 0;
+    msgEls.clear();
+    $('chat-messages').innerHTML = '<div class="chat-empty">Loading messages…</div>';
+    renderTyping();
+    updateChatTools();
+  }
+
+  function updateChatTools() {
+    const btn = $('chat-clear-btn');
+    if (!btn) return;
+    btn.hidden = !(isOwner() && lastMsgDocs.length && currentTeamId);
+  }
+
+  // ----- read receipts -----
+
+  function scheduleMarkRead() {
+    clearTimeout(readTimer);
+    readTimer = setTimeout(markChatRead, 350);
+  }
+
+  function markChatRead() {
+    if (!currentUser || !currentTeamId) return;
+    // Only count as "seen" when the chat is really in front of the user.
+    if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
+
+    let newestOther = 0;
+    let newestAny = 0;
+    lastMsgDocs.forEach((d) => {
+      const x = d.data({ serverTimestamps: 'estimate' });
+      const t = x.createdAt && x.createdAt.toMillis ? x.createdAt.toMillis() : 0;
+      newestAny = Math.max(newestAny, t);
+      if (x.senderId !== currentUser.uid) newestOther = Math.max(newestOther, t);
+    });
+
+    if (newestOther && newestOther > (readsMap[currentUser.uid] || 0) && lastReadWriteFor !== newestOther) {
+      lastReadWriteFor = newestOther;
+      window.lifeIsShortDb.collection('teams').doc(currentTeamId).collection('reads').doc(currentUser.uid)
+        .set({ name: displayName(), at: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+        .catch((err) => console.warn('read receipt not saved (check Firestore rules for teams/{id}/reads)', err));
+    }
+    // Clears the bell / sidebar badge for this team.
+    if (window.teamNotify) window.teamNotify.markRead(currentTeamId, newestAny);
+  }
+
+  // ----- typing indicator -----
+
+  function typingRef(teamId) {
+    return window.lifeIsShortDb.collection('teams').doc(teamId).collection('typing').doc(currentUser.uid);
+  }
+
+  function onChatInput() {
+    if (!currentUser || !currentTeamId) return;
+    if (!$('chat-input').value.trim()) { stopTyping(); return; }
+    const now = Date.now();
+    if (!iAmTyping || now - lastTypingSent > 2500) {
+      iAmTyping = true;
+      typingTeamId = currentTeamId;
+      lastTypingSent = now;
+      typingRef(currentTeamId)
+        .set({ name: displayName(), typing: true, at: firebase.firestore.FieldValue.serverTimestamp() })
+        .catch((err) => console.warn('typing flag not saved (check Firestore rules for teams/{id}/typing)', err));
+    }
+    clearTimeout(stopTypingTimeout);
+    stopTypingTimeout = setTimeout(stopTyping, 4000);
+  }
+
+  function stopTyping() {
+    clearTimeout(stopTypingTimeout);
+    if (!iAmTyping) return;
+    iAmTyping = false;
+    lastTypingSent = 0;
+    const teamId = typingTeamId;
+    typingTeamId = null;
+    if (currentUser && teamId && window.lifeIsShortDb) typingRef(teamId).delete().catch(() => {});
+  }
+
+  function renderTyping() {
+    const bar = $('typing-bar');
+    if (!bar) return;
+    const names = Object.keys(typingMap).map((u) => typingMap[u].name);
+    if (!names.length) { bar.hidden = true; bar.textContent = ''; return; }
+    const text = names.length === 1 ? names[0] + ' is typing'
+      : names.length === 2 ? names[0] + ' and ' + names[1] + ' are typing'
+      : 'Several people are typing';
+    bar.textContent = '';
+    const dots = mk('span', 'typing-dots');
+    dots.innerHTML = '<i></i><i></i><i></i>';
+    bar.append(dots, document.createTextNode(' ' + text));
+    bar.hidden = false;
+  }
+
+  // ----- sending / deleting -----
 
   async function sendMessage(event) {
     event.preventDefault();
@@ -432,14 +905,57 @@
     const text = input.value.trim();
     if (!text || !currentTeamId) return;
     input.value = '';
-    await window.lifeIsShortDb.collection('teams').doc(currentTeamId).collection('messages').add({
-      senderId: currentUser.uid,
-      senderName: displayName(),
-      text,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    stopTyping();
+    forceScroll = true;
+    try {
+      await window.lifeIsShortDb.collection('teams').doc(currentTeamId).collection('messages').add({
+        senderId: currentUser.uid,
+        senderName: displayName(),
+        text,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    } catch (error) {
+      console.error('sendMessage failed', error);
+      input.value = text;
+      alert('Could not send the message: ' + (error && error.message ? error.message : error));
+    }
   }
 
+  async function deleteMessage(id) {
+    if (!currentTeamId || !id) return;
+    if (!confirm('Delete this message for everyone?')) return;
+    try {
+      await window.lifeIsShortDb.collection('teams').doc(currentTeamId).collection('messages').doc(id).delete();
+    } catch (error) {
+      console.error('deleteMessage failed', error);
+      alert('Could not delete the message: ' + (error && error.message ? error.message : error) +
+        '\n\nCheck that your Firestore rules allow deleting from teams/{teamId}/messages (see FIRESTORE-RULES.md).');
+    }
+  }
+
+  async function clearChat() {
+    if (!isOwner() || !currentTeamId) return;
+    if (!confirm('Delete the ENTIRE chat history of "' + (currentTeamData.name || 'this team') + '" for everyone? This cannot be undone.')) return;
+    const db = window.lifeIsShortDb;
+    const col = db.collection('teams').doc(currentTeamId).collection('messages');
+    try {
+      for (;;) {
+        const snap = await col.limit(200).get();
+        if (snap.empty) break;
+        try {
+          const batch = db.batch();
+          snap.docs.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        } catch (batchErr) {
+          // Fallback if the rules engine rejects a big batch: delete one by one.
+          await Promise.all(snap.docs.map((d) => d.ref.delete()));
+        }
+      }
+    } catch (error) {
+      console.error('clearChat failed', error);
+      alert('Could not clear the chat: ' + (error && error.message ? error.message : error));
+    }
+  }
 
   // ---------- Rewards ----------
 
@@ -502,6 +1018,19 @@
     $('add-goal-btn').addEventListener('click', addGoal);
     $('add-reward-btn').addEventListener('click', addReward);
     $('chat-form').addEventListener('submit', sendMessage);
+    $('chat-input').addEventListener('input', onChatInput);
+    $('chat-input').addEventListener('blur', stopTyping);
+    $('chat-clear-btn').addEventListener('click', clearChat);
+    $('chat-messages').addEventListener('click', (e) => {
+      const btn = e.target.closest('.msg-del');
+      if (!btn) return;
+      const node = btn.closest('.chat-msg');
+      if (node) deleteMessage(node.dataset.id);
+    });
+    // "Seen" only counts while the chat is actually in front of the user.
+    document.addEventListener('visibilitychange', scheduleMarkRead);
+    window.addEventListener('focus', scheduleMarkRead);
+    window.addEventListener('pagehide', stopTyping);
     $('copy-invite-btn').addEventListener('click', () => {
       if (!currentTeamData) return;
       navigator.clipboard?.writeText(currentTeamData.inviteCode).then(() => {

@@ -135,7 +135,10 @@
 
     $('side-day').textContent = 'DAY ' + y.dayOfYear + ' / ' + y.total;
     $('side-year-fill').style.width = y.pct + '%';
-    $('epoch-lbl').textContent = 'Q' + (Math.floor(now.getMonth() / 3) + 1) + ' ' + now.getFullYear();
+    // Today's date (e.g. WED, 30 SEP 2026) — refreshed by renderTime() so it rolls over at midnight
+    const DOW = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    const MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    $('epoch-lbl').textContent = DOW[now.getDay()] + ', ' + now.getDate() + ' ' + MON[now.getMonth()] + ' ' + now.getFullYear();
     const tzMin = -now.getTimezoneOffset();
     const sign = tzMin >= 0 ? '+' : '-';
     const abs = Math.abs(tzMin);

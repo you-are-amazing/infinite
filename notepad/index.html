@@ -6,7 +6,7 @@
   <title>Notepad &amp; Docs - Infinite</title>
   <meta name="description" content="Write, organize, and revisit your personal notes.">
   <link rel="icon" href="../deserve.png" type="image/png">
-  <link rel="stylesheet" href="../static/css/style.css?v=23">
+  <link rel="stylesheet" href="../static/css/style.css?v=25">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -15,6 +15,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
   <script src="../static/js/auth.js?v=7" defer></script>
+  <script src="../static/js/team-notify.js?v=2" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -56,7 +57,13 @@
       </aside>
 
       <main class="np-main">
-        <section class="np-editor" aria-label="Note editor">
+        <section class="np-empty" id="np-empty" aria-live="polite">
+          <div class="np-empty-icon"><i class="fa-regular fa-note-sticky"></i></div>
+          <h2>No notes yet</h2>
+          <p>Press <b>+ New note</b> to start writing. Nothing is created until you do.</p>
+          <button class="np-new np-empty-btn" id="new-note-empty" type="button">+ New note</button>
+        </section>
+        <section class="np-editor" id="np-editor" aria-label="Note editor" hidden>
           <input id="note-title" type="text" maxlength="120" placeholder="Untitled note" aria-label="Note title">
           <div id="note-date"></div>
           <div class="np-tools" role="toolbar" aria-label="Text formatting">
@@ -122,6 +129,8 @@
       const list = document.getElementById('note-list');
       const count = document.getElementById('note-count');
       const date = document.getElementById('note-date');
+      const editorEl = document.getElementById('np-editor');
+      const emptyEl = document.getElementById('np-empty');
       let notes = loadNotes();
       let activeId = notes[0]?.id || null;
 
@@ -169,7 +178,7 @@
           const empty = document.createElement('div');
           empty.className = 'empty-hint';
           empty.style.padding = '12px 6px';
-          empty.textContent = 'Your notes will appear here.';
+          empty.textContent = 'No notes yet. Press + New note to add one.';
           list.appendChild(empty);
           return;
         }
@@ -203,10 +212,17 @@
         });
       }
 
+      // Show the editor only when a real note is open; otherwise show the "No notes yet" screen.
+      function showEditor(on) {
+        editorEl.hidden = !on;
+        emptyEl.hidden = on;
+      }
+
       function openNote(id) {
         activeId = id;
         const note = activeNote();
-        if (!note) return;
+        if (!note) { showEditor(false); return; }
+        showEditor(true);
         title.value = note.title || '';
         body.innerHTML = note.body || '';
         date.textContent = `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}`;
@@ -239,7 +255,7 @@
         if (activeId === id) {
           activeId = notes[0]?.id || null;
           if (activeId) { saveNotes(); openNote(activeId); }
-          else { saveNotes(); title.value = ''; body.innerHTML = ''; date.textContent = ''; renderList(); }
+          else { saveNotes(); title.value = ''; body.innerHTML = ''; date.textContent = ''; showEditor(false); renderList(); }
         } else { saveNotes(); }
       }
 
@@ -282,6 +298,7 @@
       }
 
       document.getElementById('new-note').addEventListener('click', createNote);
+      document.getElementById('new-note-empty').addEventListener('click', createNote);
       [title, body].forEach((element) => element.addEventListener('input', updateNote));
       document.getElementById('highlight-btn').addEventListener('click', toggleHighlight);
       document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => {
@@ -295,11 +312,11 @@
         activeId = notes[0]?.id || null;
         renderList();
         if (activeId) openNote(activeId);
-        else { title.value = ''; body.innerHTML = ''; date.textContent = ''; }
+        else { title.value = ''; body.innerHTML = ''; date.textContent = ''; showEditor(false); }
       });
 
       renderList();
-      if (activeId) openNote(activeId); else createNote();
+      if (activeId) openNote(activeId); else showEditor(false);   // never auto-create an untitled note
     })();
   </script>
 

@@ -1,11 +1,19 @@
-/* Team chat notifications — shared by every page that has a top bar.
+/* Team chat notifications — include this script on EVERY page of the site.
    Shows a bell (with a red count) in the top bar, a badge next to "Team Goals"
    in the sidebar, a small pop-up for new messages, and a slide-in panel that
-   lists unread messages from teammates. Needs auth.js (Firebase) on the page. */
+   lists unread messages from teammates.
+
+   Needs auth.js (Firebase Auth + Firestore) loaded on the same page.
+   Works even if a page has no .top-actions bar (a floating bell is used instead).
+   Exposes window.teamNotify = { markRead(teamId, upToMs), open(), count() } for team.js. */
 (function () {
   'use strict';
+  if (window.__teamNotifyLoaded) return;      // safe if a page accidentally includes it twice
+  window.__teamNotifyLoaded = true;
 
-  const SCRIPT_SRC = document.currentScript && document.currentScript.src;
+  const SCRIPT_EL = document.currentScript || document.querySelector('script[src*="team-notify.js"]');
+  const SCRIPT_SRC = SCRIPT_EL && SCRIPT_EL.src;
+  // team-notify.js lives in /static/js/, the team page in /team/
   const TEAM_URL = SCRIPT_SRC ? new URL('../../team/', SCRIPT_SRC).href : 'team/';
   const ON_TEAM_PAGE = /\/team(\/(index\.html)?)?$/.test(location.pathname);
   const BASE_TITLE = document.title;
@@ -13,8 +21,9 @@
   let user = null;
   let built = false;
   let teamsUnsub = null;
-  const watchers = {};      // teamId -> unsubscribe
+  const watchers = {};      // teamId -> unsubscribe (messages + own read receipt)
   const teamNames = {};     // teamId -> name
+  const readAt = {};        // teamId -> ms of my last read receipt from the server (any device)
   let items = [];           // { id, teamId, teamName, sender, text, ts }
   let toastTimer = null;
   let el = {};
@@ -32,12 +41,13 @@
   const CSS = `
     .nav-badge{margin-left:auto;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:var(--red,#f26d6d);color:#fff;font-size:10px;font-weight:800;font-style:normal}
     .nav-badge[hidden],.notif-badge[hidden],.notif-bell[hidden],.notif-overlay[hidden],.notif-toast[hidden]{display:none}
+    .notif-float{position:fixed;top:12px;right:16px;z-index:95;display:flex;align-items:center;gap:9px}
     .notif-bell{position:relative;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;border:1px solid var(--line-soft,#243044);border-radius:9px;background:var(--surface2,#131c2b);color:var(--muted,#8b98ad);font-size:14px;cursor:pointer}
     .notif-bell:hover,.notif-bell.has-new{color:var(--amber,#f5b04a);border-color:var(--amber,#f5b04a)}
     .notif-badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;padding:0 4px;display:flex;align-items:center;justify-content:center;border-radius:999px;background:var(--red,#f26d6d);color:#fff;font-size:9px;font-weight:800;border:2px solid var(--surface,#0e1522)}
-    .notif-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90}
-    .notif-drawer{position:fixed;top:0;right:0;height:100%;width:360px;max-width:92vw;background:var(--surface,#0e1522);border-left:1px solid var(--line-soft,#243044);box-shadow:-12px 0 40px rgba(0,0,0,.4);z-index:100;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s ease}
-    .notif-drawer.open{transform:translateX(0)}
+    .notif-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900}
+    .notif-drawer{position:fixed;top:0;right:0;height:100%;width:360px;max-width:92vw;background:var(--surface,#0e1522);border-left:1px solid var(--line-soft,#243044);box-shadow:-12px 0 40px rgba(0,0,0,.4);z-index:910;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s ease;visibility:hidden}
+    .notif-drawer.open{transform:translateX(0);visibility:visible}
     .nd-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line-soft,#243044);color:var(--text,#e9eff7);font-size:14px}
     .nd-head i{color:var(--amber,#f5b04a);margin-right:6px}
     .nd-actions{display:flex;align-items:center;gap:8px}
@@ -45,25 +55,32 @@
     .nd-actions button:hover{color:var(--text,#e9eff7)}
     .nd-list{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
     .nd-empty{color:var(--muted,#8b98ad);font-size:12.5px;text-align:center;padding:40px 10px}
-    .nd-item{text-align:left;background:var(--surface2,#131c2b);border:1px solid var(--line-soft,#243044);border-radius:10px;padding:10px 12px;cursor:pointer;color:var(--text,#e9eff7)}
+    .nd-item{text-align:left;background:var(--surface2,#131c2b);border:1px solid var(--line-soft,#243044);border-radius:10px;padding:10px 12px;cursor:pointer;color:var(--text,#e9eff7);font-family:inherit}
     .nd-item:hover{border-color:var(--lav,#8f8ff0)}
     .nd-top{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted,#8b98ad);margin-bottom:4px}
     .nd-top strong{color:var(--lav,#8f8ff0);font-weight:700}
     .nd-msg{font-size:13px;word-break:break-word}
     .nd-time{font-size:10.5px;color:var(--faint,#5c6a80);margin-top:4px}
-    .notif-toast{position:fixed;right:20px;bottom:20px;max-width:320px;background:var(--surface2,#131c2b);border:1px solid var(--lav,#8f8ff0);border-radius:12px;padding:12px 14px;color:var(--text,#e9eff7);font-size:12.5px;box-shadow:0 10px 30px rgba(0,0,0,.45);z-index:110;cursor:pointer}
+    .notif-toast{position:fixed;right:20px;bottom:20px;max-width:320px;background:var(--surface2,#131c2b);border:1px solid var(--lav,#8f8ff0);border-radius:12px;padding:12px 14px;color:var(--text,#e9eff7);font-size:12.5px;box-shadow:0 10px 30px rgba(0,0,0,.45);z-index:920;cursor:pointer;word-break:break-word}
     .notif-toast b{display:block;color:var(--lav,#8f8ff0);font-size:11.5px;margin-bottom:3px}
   `;
 
   function build() {
     if (built) return true;
-    const top = document.querySelector('.top-actions');
-    if (!top) return false;
+    if (!document.body) return false;
     built = true;
 
     const style = document.createElement('style');
     style.textContent = CSS;
     document.head.appendChild(style);
+
+    // Put the bell in the top bar if the page has one, otherwise float it top-right.
+    let top = document.querySelector('.top-actions');
+    if (!top) {
+      top = document.createElement('div');
+      top.className = 'notif-float';
+      document.body.appendChild(top);
+    }
 
     const bell = document.createElement('button');
     bell.type = 'button';
@@ -74,7 +91,7 @@
     bell.setAttribute('aria-label', 'Team chat notifications');
     bell.innerHTML = '<i class="fa-regular fa-bell"></i><span class="notif-badge" id="notif-badge" hidden>0</span>';
     const ref = $('sticky-bell-btn') || top.querySelector('.cloud-pill');
-    top.insertBefore(bell, ref || null);
+    top.insertBefore(bell, ref && ref.parentNode === top ? ref : null);
 
     const overlay = document.createElement('div');
     overlay.className = 'notif-overlay';
@@ -101,8 +118,9 @@
     document.body.appendChild(drawer);
     document.body.appendChild(toast);
 
-    // Badge next to "Team Goals" in the sidebar.
-    const navLink = Array.from(document.querySelectorAll('.nav-item')).find((a) => /team goals/i.test(a.textContent));
+    // Badge next to "Team Goals" in the sidebar (matched by link or by label, whichever the page has).
+    const navLink = Array.from(document.querySelectorAll('.nav-item')).find((a) =>
+      /(^|\/)team\/?(index\.html)?$/.test(a.getAttribute('href') || '') || /team goals/i.test(a.textContent));
     let navBadge = null;
     if (navLink) {
       navBadge = document.createElement('span');
@@ -120,6 +138,13 @@
     $('notif-readall').addEventListener('click', () => markRead(null));
     toast.addEventListener('click', openDrawer);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+    // Another tab marked things as read -> follow it.
+    window.addEventListener('storage', (e) => {
+      if (e.key !== seenKey()) return;
+      const seen = readSeen();
+      items = items.filter((n) => n.ts > (seen[n.teamId] || 0));
+      render();
+    });
     render();
     return true;
   }
@@ -184,8 +209,12 @@
     toastTimer = setTimeout(() => { el.toast.hidden = true; }, 5000);
   }
 
-  function markRead(teamId) {
+  // markRead(null)            -> everything
+  // markRead(teamId)          -> that team's unread items
+  // markRead(teamId, upToMs)  -> also remember "read up to this message time" (used by the team page)
+  function markRead(teamId, upToMs) {
     const seen = readSeen();
+    if (teamId && upToMs) seen[teamId] = Math.max(seen[teamId] || 0, upToMs);
     items.forEach((n) => {
       if (teamId && n.teamId !== teamId) return;
       seen[n.teamId] = Math.max(seen[n.teamId] || 0, n.ts);
@@ -197,9 +226,15 @@
 
   /* ---------- Firestore watching ---------- */
 
+  function unwatch(id) {
+    if (watchers[id]) { watchers[id](); delete watchers[id]; }
+    delete readAt[id];
+    items = items.filter((n) => n.teamId !== id);
+  }
+
   function stop() {
     if (teamsUnsub) { teamsUnsub(); teamsUnsub = null; }
-    Object.keys(watchers).forEach((id) => { watchers[id](); delete watchers[id]; });
+    Object.keys(watchers).forEach(unwatch);
     items = [];
     render();
   }
@@ -207,14 +242,16 @@
   function watchMessages(teamDocs) {
     const db = window.lifeIsShortDb;
     const ids = teamDocs.map((d) => d.id);
-    Object.keys(watchers).forEach((id) => {
-      if (!ids.includes(id)) { watchers[id](); delete watchers[id]; items = items.filter((n) => n.teamId !== id); }
-    });
+    Object.keys(watchers).forEach((id) => { if (!ids.includes(id)) unwatch(id); });
+    render();
+
     teamDocs.forEach((doc) => {
       teamNames[doc.id] = (doc.data() || {}).name || 'Team';
       if (watchers[doc.id]) return;
       let first = true;
-      watchers[doc.id] = db.collection('teams').doc(doc.id).collection('messages')
+      const teamRef = db.collection('teams').doc(doc.id);
+
+      const unsubMessages = teamRef.collection('messages')
         .orderBy('createdAt', 'desc').limit(30)
         .onSnapshot((snap) => {
           const seenMap = readSeen();
@@ -223,12 +260,20 @@
             seenMap[doc.id] = snap.docs.reduce((m, d) => Math.max(m, msOf(d.data().createdAt)), 0);
             writeSeen(seenMap);
           }
-          const seenTs = seenMap[doc.id];
+          const seenTs = Math.max(seenMap[doc.id] || 0, readAt[doc.id] || 0);
+          // Reading this team's chat right now (team page, tab in front)? Then it's not "unread".
+          const watchingNow = ON_TEAM_PAGE && window.infiniteActiveTeamId === doc.id &&
+            document.visibilityState === 'visible' && document.hasFocus();
+
           snap.docChanges().forEach((change) => {
+            if (change.type === 'removed') {              // message deleted by its sender / owner
+              items = items.filter((n) => n.id !== change.doc.id);
+              return;
+            }
             if (change.type !== 'added') return;
             const m = change.doc.data();
             const ts = msOf(m.createdAt);
-            if (!ts || m.senderId === user.uid || ts <= seenTs) return;
+            if (!ts || m.senderId === user.uid || ts <= seenTs || watchingNow) return;
             if (items.some((n) => n.id === change.doc.id)) return;
             const item = { id: change.doc.id, teamId: doc.id, teamName: teamNames[doc.id], sender: m.senderName || 'Someone', text: m.text || '', ts };
             items.push(item);
@@ -237,6 +282,20 @@
           first = false;
           render();
         }, (err) => console.warn('team notifications', err));
+
+      // My own read receipt (written by the team page, possibly on another device) clears older unread items.
+      const unsubRead = teamRef.collection('reads').doc(user.uid)
+        .onSnapshot((snap) => {
+          const d = snap.exists ? snap.data({ serverTimestamps: 'estimate' }) : null;
+          const at = d ? msOf(d.at) : 0;
+          if (!at) return;
+          readAt[doc.id] = at;
+          const before = items.length;
+          items = items.filter((n) => !(n.teamId === doc.id && n.ts <= at));
+          if (items.length !== before) render();
+        }, () => {});
+
+      watchers[doc.id] = () => { unsubMessages(); unsubRead(); };
     });
   }
 
@@ -267,6 +326,12 @@
       else if (++tries > 40) clearInterval(poll);
     }, 250);
   }
+
+  window.teamNotify = {
+    markRead,
+    open: () => { if (built) openDrawer(); },
+    count: () => items.length
+  };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

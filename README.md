@@ -72,6 +72,25 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read, create: if request.auth != null &&
           request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
+        // a sender can delete their own message; the team owner can delete any (used by "Clear chat")
+        allow delete: if request.auth != null &&
+          request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds &&
+          (resource.data.senderId == request.auth.uid ||
+           get(/databases/$(database)/documents/teams/$(teamId)).data.ownerId == request.auth.uid);
+      }
+      // "Seen" receipts: each member writes only their own doc
+      match /reads/{uid} {
+        allow read: if request.auth != null &&
+          request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
+        allow create, update, delete: if request.auth != null && request.auth.uid == uid &&
+          request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
+      }
+      // "Typing…" indicator: each member writes only their own doc
+      match /typing/{uid} {
+        allow read: if request.auth != null &&
+          request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
+        allow create, update, delete: if request.auth != null && request.auth.uid == uid &&
+          request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
       }
       match /rewards/{rewardId} {
         allow read, create, update: if request.auth != null &&
