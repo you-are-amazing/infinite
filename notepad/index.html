@@ -6,7 +6,7 @@
   <title>Notepad &amp; Docs - Infinite</title>
   <meta name="description" content="Write, organize, and revisit your personal notes.">
   <link rel="icon" href="../deserve.png" type="image/png">
-  <link rel="stylesheet" href="../static/css/style.css?v=19">
+  <link rel="stylesheet" href="../static/css/style.css?v=23">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
-  <script src="../static/js/auth.js?v=6" defer></script>
+  <script src="../static/js/auth.js?v=7" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -43,7 +43,6 @@
       <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
       <div class="top-actions">
         <div id="auth-account-actions" class="auth-account-actions" hidden></div>
-        <span class="cloud-pill"><i class="fa-solid fa-cloud"></i>Cloud Synced</span>
       </div>
     </div>
 
@@ -53,9 +52,6 @@
           <button class="np-new" id="new-note" type="button">+ New note</button>
           <div class="np-count"><span>YOUR NOTES</span><span id="note-count">0</span></div>
           <div class="np-list" id="note-list" aria-label="Saved notes"></div>
-        </div>
-        <div class="np-side-foot">
-          <a class="icon-btn2" href="../" title="Home" aria-label="Back to home" style="text-decoration:none; display:inline-flex; align-items:center; justify-content:center;"><i class="fa-solid fa-house"></i></a>
         </div>
       </aside>
 
@@ -322,5 +318,14 @@
       <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
     </form>
   </dialog>
+  <script>
+    // Keep the fixed notes sidebar right under the top bar.
+    (function () {
+      var tb = document.querySelector('.topbar'); if (!tb) return;
+      function sync() { document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px'); }
+      sync(); window.addEventListener('resize', sync); window.addEventListener('load', sync);
+      if (window.ResizeObserver) new ResizeObserver(sync).observe(tb);
+    })();
+  </script>
 </body>
 </html>
