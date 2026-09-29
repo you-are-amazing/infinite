@@ -15,7 +15,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
   <script src="../static/js/auth.js?v=7" defer></script>
-  <script src="../static/js/team.js?v=4" defer></script>
+  <script src="../static/js/team.js?v=5" defer></script>
   <script src="../static/js/team-notify.js?v=2" defer></script>
 </head>
 <body>
@@ -170,6 +170,14 @@
         </div>
         <div class="wire-msgs" id="chat-messages"><div class="chat-empty">Sign in and pick a team to start chatting.</div></div>
         <div class="typing-bar" id="typing-bar" aria-live="polite" hidden></div>
+        <div class="reply-bar" id="reply-bar" hidden>
+          <i class="fa-solid fa-reply"></i>
+          <div class="rb-text">
+            <div class="rb-name" id="reply-bar-name"></div>
+            <div class="rb-snip" id="reply-bar-text"></div>
+          </div>
+          <button type="button" class="rb-close" id="reply-bar-close" title="Cancel reply" aria-label="Cancel reply"><i class="fa-solid fa-xmark"></i></button>
+        </div>
         <form class="wire-input" id="chat-form">
           <input type="text" id="chat-input" maxlength="300" placeholder="Message your team…" autocomplete="off">
           <button type="submit" aria-label="Send message"><i class="fa-solid fa-paper-plane"></i></button>

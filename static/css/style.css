@@ -618,7 +618,7 @@ body.auth-lock { overflow: hidden; }
 .chat-empty { color: var(--muted); font-size: 12.5px; text-align: center; padding: 40px 10px; }
 
 .chat-msg { position: relative; overflow-wrap: anywhere; }
-.chat-msg .msg-text { white-space: pre-wrap; line-height: 1.45; padding-right: 14px; }
+.chat-msg .msg-text { white-space: pre-wrap; line-height: 1.45; padding-right: 34px; }
 .chat-msg.has-preview { width: min(280px, 85%); }
 .chat-link { color: var(--lav); text-decoration: underline; text-underline-offset: 2px; }
 .chat-link:hover { color: var(--green); }
@@ -651,6 +651,31 @@ body.auth-lock { overflow: hidden; }
 .chat-msg:hover .msg-del, .msg-del:focus-visible { opacity: 1; }
 .msg-del:hover { color: var(--red); background: var(--red-soft); }
 @media (hover: none) { .msg-del { opacity: .65; } }
+
+/* ---- Replies (WhatsApp style) ---- */
+.msg-reply { position: absolute; top: 4px; right: 28px; width: 20px; height: 20px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); cursor: pointer; font-size: 10px; opacity: 0; transition: opacity .12s ease; }
+.chat-msg:hover .msg-reply, .msg-reply:focus-visible { opacity: 1; }
+.msg-reply:hover { color: var(--green); background: var(--green-soft); }
+@media (hover: none) { .msg-reply { opacity: .65; } }
+
+.msg-quote { display: block; width: 100%; text-align: left; border: 0; border-left: 3px solid var(--green); border-radius: 7px; background: rgba(0,0,0,.16); padding: 5px 8px; margin-bottom: 6px; cursor: pointer; font-family: inherit; color: inherit; }
+.msg-quote:hover { background: rgba(0,0,0,.26); border-left-color: var(--lav); }
+.msg-quote b { display: block; font-size: 10.5px; font-weight: 800; color: var(--green); letter-spacing: .03em; }
+.msg-quote span { display: block; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-msg.mine .msg-quote { background: rgba(0,0,0,.12); }
+.chat-msg.mine .msg-quote b { color: var(--green); }
+
+.chat-msg.flash { animation: msg-flash 1.3s ease; }
+@keyframes msg-flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 15%, 70% { box-shadow: 0 0 0 2px var(--green); } }
+
+.reply-bar { display: flex; align-items: center; gap: 9px; padding: 9px 12px 0; color: var(--muted); }
+.reply-bar[hidden] { display: none; }
+.reply-bar > i { color: var(--green); font-size: 12px; flex: none; }
+.rb-text { flex: 1; min-width: 0; border-left: 3px solid var(--green); border-radius: 7px; background: var(--surface2); padding: 6px 9px; }
+.rb-name { font-size: 10.5px; font-weight: 800; color: var(--green); letter-spacing: .03em; }
+.rb-snip { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rb-close { flex: none; width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; color: var(--faint); cursor: pointer; font-size: 12px; }
+.rb-close:hover { color: var(--red); background: var(--red-soft); }
 
 .typing-bar { padding: 4px 16px 6px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 2px; }
 .typing-bar[hidden] { display: none; }

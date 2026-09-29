@@ -14,6 +14,7 @@
  *     -- team goals --  participants: { uid: 'pending'|'done' }
  *   teams/{teamId}/messages/{messageId}
  *     senderId, senderName, text, createdAt
+ *     -- replies (WhatsApp style) --  replyTo: { id, name, text }  (snapshot, so it survives deletes)
  *   teams/{teamId}/reads/{uid}      -- read receipts: { name, at }  ("seen" = message.createdAt <= at)
  *   teams/{teamId}/typing/{uid}     -- typing indicator: { name, typing, at }  (deleted when the user stops)
  *   teams/{teamId}/rewards/{rewardId}
@@ -51,6 +52,7 @@
   let forceScroll = false;
   let readTimer = null;
   let lastReadWriteFor = 0;
+  let replyTo = null;              // { id, name, text } of the message being replied to
   const msgEls = new Map();       // messageId -> element (so updates never rebuild the whole list)
 
   const $ = (id) => document.getElementById(id);
@@ -81,6 +83,7 @@
       teardownTeamListeners();
       currentTeamId = null;
       window.infiniteActiveTeamId = null;
+      clearReply();
       msgEls.clear();
       $('chat-messages').innerHTML = '<div class="chat-empty">Sign in and pick a team to start chatting.</div>';
       if (teamsUnsub) { teamsUnsub(); teamsUnsub = null; }
@@ -245,6 +248,7 @@
       window.infiniteActiveTeamId = null;
       teardownTeamListeners();
       setChatTitle('');
+      clearReply();
       updateChatTools();
       $('team-content').hidden = true;
       $('no-team-state').hidden = false;
@@ -663,6 +667,62 @@
     return (m && m.name) || 'Member';
   }
 
+  // ----- replies (WhatsApp style: quote in the bubble, bar above the input) -----
+
+  function snippet(text, max) {
+    const s = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+    return s.length > max ? s.slice(0, max - 1) + '…' : s;
+  }
+
+  function buildQuote(reply) {
+    const q = mk('div', 'msg-quote');
+    if (reply.id) q.dataset.id = reply.id;
+    q.append(mk('b', null, reply.name || 'Someone'), mk('span', null, snippet(reply.text, 70)));
+    q.title = 'Jump to the original message';
+    return q;
+  }
+
+  function updateReplyBar() {
+    const bar = $('reply-bar');
+    if (!bar) return;
+    bar.hidden = !replyTo;
+    if (!replyTo) return;
+    $('reply-bar-name').textContent = 'Replying to ' + (replyTo.name || 'Someone');
+    $('reply-bar-text').textContent = snippet(replyTo.text, 70);
+  }
+
+  function startReply(id) {
+    const doc = lastMsgDocs.find((d) => d.id === id);
+    if (!doc) return;
+    const m = doc.data();
+    replyTo = { id: id, name: m.senderName || memberName(m.senderId), text: m.text || '' };
+    updateReplyBar();
+    const input = $('chat-input');
+    if (input) {
+      input.placeholder = 'Reply to ' + (replyTo.name || 'Someone') + '…';
+      input.focus();
+    }
+    const wrap = $('chat-messages');
+    if (wrap) wrap.scrollTop = wrap.scrollHeight;
+  }
+
+  function clearReply() {
+    replyTo = null;
+    updateReplyBar();
+    const input = $('chat-input');
+    if (input) input.placeholder = 'Message your team…';
+  }
+
+  function jumpToMessage(id) {
+    const node = msgEls.get(id);
+    if (!node) return;
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    node.classList.remove('flash');
+    void node.offsetWidth;                 // restart the highlight animation
+    node.classList.add('flash');
+    setTimeout(() => node.classList.remove('flash'), 1400);
+  }
+
   function buildMessage(doc) {
     const msg = doc.data();
     const mine = msg.senderId === currentUser.uid;
@@ -670,6 +730,7 @@
     node.dataset.id = doc.id;
 
     if (!mine) node.appendChild(mk('div', 'sender', msg.senderName || 'Someone'));
+    if (msg.replyTo && (msg.replyTo.text || msg.replyTo.id)) node.appendChild(buildQuote(msg.replyTo));
 
     const body = mk('div', 'msg-text');
     const urls = [];
@@ -698,6 +759,13 @@
     const foot = mk('div', 'msg-foot');
     foot.append(mk('span', 'time'), mk('span', 'ticks'), mk('span', 'seen-label'));
     node.appendChild(foot);
+
+    const replyBtn = mk('button', 'msg-reply');
+    replyBtn.type = 'button';
+    replyBtn.title = 'Reply';
+    replyBtn.setAttribute('aria-label', 'Reply to this message');
+    replyBtn.innerHTML = '<i class="fa-solid fa-reply"></i>';
+    node.appendChild(replyBtn);
 
     const del = mk('button', 'msg-del');
     del.type = 'button';
@@ -807,6 +875,7 @@
     chatInitial = true;
     forceScroll = false;
     lastReadWriteFor = 0;
+    clearReply();
     msgEls.clear();
     $('chat-messages').innerHTML = '<div class="chat-empty">Loading messages…</div>';
     renderTyping();
@@ -904,16 +973,20 @@
     const input = $('chat-input');
     const text = input.value.trim();
     if (!text || !currentTeamId) return;
+    const reply = replyTo;
     input.value = '';
     stopTyping();
     forceScroll = true;
     try {
-      await window.lifeIsShortDb.collection('teams').doc(currentTeamId).collection('messages').add({
+      const data = {
         senderId: currentUser.uid,
         senderName: displayName(),
         text,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      };
+      if (reply) data.replyTo = reply;
+      await window.lifeIsShortDb.collection('teams').doc(currentTeamId).collection('messages').add(data);
+      if (reply && replyTo && replyTo.id === reply.id) clearReply();
     } catch (error) {
       console.error('sendMessage failed', error);
       input.value = text;
@@ -1022,11 +1095,23 @@
     $('chat-input').addEventListener('blur', stopTyping);
     $('chat-clear-btn').addEventListener('click', clearChat);
     $('chat-messages').addEventListener('click', (e) => {
+      const replyBtn = e.target.closest('.msg-reply');
+      if (replyBtn) {
+        const target = replyBtn.closest('.chat-msg');
+        if (target) startReply(target.dataset.id);
+        return;
+      }
+      const quote = e.target.closest('.msg-quote');
+      if (quote) {
+        if (quote.dataset.id) jumpToMessage(quote.dataset.id);
+        return;
+      }
       const btn = e.target.closest('.msg-del');
       if (!btn) return;
       const node = btn.closest('.chat-msg');
       if (node) deleteMessage(node.dataset.id);
     });
+    $('reply-bar-close').addEventListener('click', clearReply);
     // "Seen" only counts while the chat is actually in front of the user.
     document.addEventListener('visibilitychange', scheduleMarkRead);
     window.addEventListener('focus', scheduleMarkRead);
