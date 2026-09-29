@@ -403,6 +403,34 @@ table.lsheet td { min-width: 130px; }
   .page.page-wide:has(.wire) { margin-right: 0; }
   .wire { position: static; width: auto; height: 520px; margin-top: 16px; border: 1px solid var(--line); border-radius: 16px; }
 }
+/* Team page: the page itself never scrolls — only the goal / win / member lists do.
+   Desktop only (chat is fixed on the right). Below 1280px the chat is a normal
+   block at the bottom, so the page keeps its original scrolling behaviour. */
+@media (min-width: 1281px) {
+  body:has(.wire) { height: 100vh; overflow: hidden; }
+  body:has(.wire) .main-wrap { height: 100vh; min-height: 0; display: flex; flex-direction: column; }
+  body:has(.wire) .topbar { flex: none; }
+  body:has(.wire) .page { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  body:has(.wire) #team-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  body:has(.wire) #team-content > .team-head,
+  body:has(.wire) #team-content > .metrics,
+  body:has(.wire) #team-content > .team-tabs,
+  body:has(.wire) .commit-row { flex: none; }
+  body:has(.wire) #team-content > .panel:not([hidden]) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  /* Hidden scrollbars: the goals / wins / members lists and the team chat still
+     scroll with wheel, trackpad and touch, they just show no bar */
+  body:has(.wire) #goals-list,
+  body:has(.wire) #rewards-list,
+  body:has(.wire) #members-list {
+    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: none; -ms-overflow-style: none;
+  }
+  body:has(.wire) .wire-msgs { scrollbar-width: none; -ms-overflow-style: none; }
+  body:has(.wire) #goals-list::-webkit-scrollbar,
+  body:has(.wire) #rewards-list::-webkit-scrollbar,
+  body:has(.wire) #members-list::-webkit-scrollbar,
+  body:has(.wire) .wire-msgs::-webkit-scrollbar { width: 0; height: 0; display: none; }
+}
 .no-team-state, .no-auth-state { max-width: 460px; margin: 9vh auto; text-align: center; color: var(--muted); }
 .no-team-state i, .no-auth-state i { font-size: 38px; color: var(--lav); margin-bottom: 14px; }
 .no-auth-state form { display: grid; gap: 10px; margin-top: 18px; text-align: left; }
