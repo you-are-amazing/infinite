@@ -319,11 +319,16 @@
       }
 
       // ----- local <-> team editing mode -----
+      // The body ships contentEditable="false" so a shared doc is never editable before a
+      // snapshot has proved you may write. This is the only place that hands the body back,
+      // so it must ALWAYS run the unlock — even when we were never in a team doc, which is
+      // the normal case for a personal note. Skipping the unlock here (as an early
+      // "if (!teamMode) return" would) leaves your own notes read only.
       function leaveTeamMode() {
-        if (!teamMode) return;
-        flushTeamSave();
+        if (teamMode) flushTeamSave();
         teamMode = null;
         title.readOnly = false;
+        body.setAttribute('aria-readonly', 'false');
         body.contentEditable = 'true';
         body.classList.remove('doc-locked');
         toolButtons().forEach((b) => { b.disabled = false; });
@@ -491,7 +496,15 @@
         if (userTeamsUnsub) { userTeamsUnsub(); userTeamsUnsub = null; }
         Object.keys(teamUnsubs).forEach((id) => { teamUnsubs[id](); });
         teamUnsubs = {}; teamDocsMap = {}; userTeams = {};
-        if (teamMode) leaveTeamMode();
+        // Signing out (or being removed) while a team doc is on screen: go back to a real
+        // note of your own. Leaving the team doc's text on screen would be editable but
+        // belong to no note, so anything typed would be silently thrown away.
+        if (teamMode) {
+          leaveTeamMode();
+          const back = activeId && notes.some((n) => n.id === activeId) ? activeId : (notes[0] && notes[0].id) || null;
+          if (back) openNote(back);
+          else { activeId = null; title.value = ''; body.innerHTML = ''; date.textContent = ''; showEditor(false); renderList(); }
+        }
         renderTeamDocs();
       }
 

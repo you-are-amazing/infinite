@@ -199,8 +199,9 @@ check('team.js locks every doc surface on start up', /lockAllDocSurfaces\(\);/.t
 
 group('Starting locked does not make a doc nobody can edit');
 
-// Every way into a doc must go through the one function that decides read-only vs editable,
-// otherwise the fail-closed default above would leave a doc permanently locked.
+// NOTE: these are structural checks only. The real proof that a doc opens editable lives in
+// tests/notepad.test.js, which loads the page in a DOM and types into it — reading the
+// source proved nothing here, because the source was correct while the page was broken.
 check('the chat doc card opens through the popup', /openDocModal\(msg\.sharedDocRef\.id\)/.test(teamJs));
 check('a Docs tab row opens through the popup', (() => {
   const fn = teamJs.slice(teamJs.indexOf('function openDoc('), teamJs.indexOf('function closeDocViewer('));
@@ -208,7 +209,13 @@ check('a Docs tab row opens through the popup', (() => {
 })());
 check('the popup runs applyDocMode (the only thing that unlocks)', /applyDocMode\('doc-modal', d\)/.test(teamJs));
 check('the docs tab viewer runs applyDocMode too', /applyDocMode\('doc', d\)/.test(teamJs));
+check('there is exactly one place that opens the popup, and it unlocks via applyDocMode',
+  (teamJs.match(/dlg\.showModal\(\)/g) || []).length === 1);
 check('a personal note is handed back an editable body', /body\.contentEditable = 'true'/.test(notepad));
+check('and that unlock is not skipped when no team doc is open', (() => {
+  const fn = notepad.slice(notepad.indexOf('function leaveTeamMode('), notepad.indexOf('function openNote('));
+  return !/if \(!teamMode\) return;/.test(fn);
+})());
 check('opening a personal note always leaves team mode first', /function openNote\(id\) \{\s*\n\s*leaveTeamMode\(\);/.test(notepad));
 check('a team doc runs the shared ACL before deciding', /const can = canEditDoc\(d\);/.test(notepad));
 
