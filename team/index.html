@@ -6,7 +6,7 @@
   <title>Team Goals - Infinite</title>
   <meta name="description" content="Create or join a team, share goals, chat and cheer each other on.">
   <link rel="icon" href="../deserve.png" type="image/png">
-  <link rel="stylesheet" href="../static/css/style.css?v=28">
+  <link rel="stylesheet" href="../static/css/style.css?v=29">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -15,7 +15,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
   <script src="../static/js/auth.js?v=7" defer></script>
-  <script src="../static/js/team.js?v=6" defer></script>
+  <script src="../static/js/team.js?v=7" defer></script>
   <script src="../static/js/team-notify.js?v=3" defer></script>
 </head>
 <body>
@@ -30,6 +30,15 @@
       <a class="nav-item" href="../notepad/"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
       <a class="nav-item active" href="./"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
     </nav>
+
+    <!-- My teams -->
+    <div class="team-list-wrap" id="team-list-wrap">
+      <div class="team-list-label">YOUR TEAMS</div>
+      <div id="team-list">
+        <div class="empty-list">Sign in to see your teams.</div>
+      </div>
+    </div>
+
     <div class="side-foot">
       <div class="sync-row"><span class="sync-dot"></span><span id="tm-sync">SYNCED · CLOUD</span></div>
       <div class="user-chip">
@@ -58,13 +67,6 @@
         <div class="head-actions">
           <button type="button" id="create-team-btn" class="btn btn-green"><i class="fa-solid fa-plus"></i>Create team</button>
           <button type="button" id="join-team-btn" class="btn"><i class="fa-solid fa-right-to-bracket"></i>Join with code</button>
-        </div>
-      </div>
-
-      <!-- My teams strip -->
-      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
-        <div id="team-list" style="display:flex; gap:8px; flex-wrap:wrap; flex:1; min-width:0;">
-          <div class="empty-list">Sign in to see your teams.</div>
         </div>
       </div>
 
