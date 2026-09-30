@@ -144,7 +144,8 @@
         const list = $('team-list');
         if (snapshot.empty) {
           list.innerHTML = '<div class="empty-list">No teams yet. Create one or join with a code.</div>';
-          if (!currentTeamId) { $('no-team-state').hidden = false; }
+          // Left / lost every team — clear the open panel so it doesn't stick under "No team yet"
+          clearTeamSelection();
           return;
         }
         list.innerHTML = '';
@@ -236,23 +237,34 @@
     }
   }
 
+  function clearTeamSelection() {
+    currentTeamId = null;
+    currentTeamData = null;
+    window.infiniteActiveTeamId = null;
+    teardownTeamListeners();
+    resetChatState();
+    setChatTitle('');
+    clearReply();
+    updateChatTools();
+    $('team-content').hidden = true;
+    // Only show "No team yet" when signed in (auth gate handles signed-out)
+    if (currentUser) $('no-team-state').hidden = false;
+    Array.from(document.querySelectorAll('.team-item')).forEach((el) => el.classList.remove('active'));
+  }
+
   async function leaveTeam() {
     if (!currentTeamId || !currentTeamData) return;
     if (!confirm(`Leave "${currentTeamData.name}"?`)) return;
+    const leavingId = currentTeamId;
     try {
-      const ref = window.lifeIsShortDb.collection('teams').doc(currentTeamId);
+      // Clear UI first so a race with the teams list snapshot can't re-show this team.
+      clearTeamSelection();
+      const ref = window.lifeIsShortDb.collection('teams').doc(leavingId);
       await ref.update({
         memberIds: firebase.firestore.FieldValue.arrayRemove(currentUser.uid),
         [`members.${currentUser.uid}`]: firebase.firestore.FieldValue.delete()
       });
-      currentTeamId = null;
-      window.infiniteActiveTeamId = null;
-      teardownTeamListeners();
-      setChatTitle('');
-      clearReply();
-      updateChatTools();
-      $('team-content').hidden = true;
-      $('no-team-state').hidden = false;
+      // watchMyTeams will auto-select another team if any remain
     } catch (error) {
       console.error('leaveTeam failed', error);
       alert('Could not leave the team: ' + (error && error.message ? error.message : error));
@@ -295,14 +307,16 @@
 
     teamDocUnsub = teamRef.onSnapshot((doc) => {
       if (!doc.exists) {
-        currentTeamId = null;
-        window.infiniteActiveTeamId = null;
-        setChatTitle('');
-        $('team-content').hidden = true;
-        $('no-team-state').hidden = false;
+        clearTeamSelection();
         return;
       }
       currentTeamData = doc.data();
+      // Kicked / left elsewhere: still on this doc but no longer a member
+      const ids = currentTeamData.memberIds || [];
+      if (currentUser && ids.indexOf(currentUser.uid) === -1) {
+        clearTeamSelection();
+        return;
+      }
       renderTeamHeader();
       renderMembers();
       refreshChat();
