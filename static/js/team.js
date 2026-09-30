@@ -15,6 +15,9 @@
  *   teams/{teamId}/messages/{messageId}
  *     senderId, senderName, text, createdAt
  *     -- replies (WhatsApp style) --  replyTo: { id, name, text }  (snapshot, so it survives deletes)
+ *     -- shared doc card --  sharedDocRef: { id, title, permission }  (points at teams/{id}/docs/{docId})
+ *   teams/{teamId}/docs/{docId}
+ *     title, body(html), ownerId, ownerName, permission: 'read'|'write', sourceNoteId, createdAt, updatedAt, updatedBy, updatedByName
  *   teams/{teamId}/reads/{uid}      -- read receipts: { name, at }  ("seen" = message.createdAt <= at)
  *   teams/{teamId}/typing/{uid}     -- typing indicator: { name, typing, at }  (deleted when the user stops)
  *   teams/{teamId}/rewards/{rewardId}
@@ -30,6 +33,15 @@
   let goalsUnsub = null;
   let messagesUnsub = null;
   let rewardsUnsub = null;
+  let docsUnsub = null;
+  let teamDocs = [];                 // QueryDocumentSnapshots of the open team
+  let openDocId = null;
+  let pendingOpenDocId = null;       // a doc we just created, open it as soon as it shows up
+  let docSaveTimer = null;
+  let docLoadedAt = 0;               // updatedAt (ms) of the version currently in the editor
+  let modalDocId = null;             // doc open in the big chat popup
+  let modalSaveTimer = null;
+  let modalLoadedAt = 0;
   let readsUnsub = null;
   let typingUnsub = null;
   let currentTeamData = null;
@@ -291,6 +303,8 @@
     if (goalsUnsub) { goalsUnsub(); goalsUnsub = null; }
     if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
     if (rewardsUnsub) { rewardsUnsub(); rewardsUnsub = null; }
+    if (docsUnsub) { docsUnsub(); docsUnsub = null; }
+    resetDocsState();
   }
 
   function selectTeam(teamId) {
@@ -327,7 +341,7 @@
       renderGoals(snap.docs);
     }, (err) => console.warn('goals listener', err));
 
-    messagesUnsub = teamRef.collection('messages').orderBy('createdAt', 'asc').limitToLast(50).onSnapshot((snap) => {
+    messagesUnsub = teamRef.collection('messages').orderBy('createdAt', 'asc').limitToLast(50).onSnapshot({ includeMetadataChanges: true }, (snap) => {
       // Someone who just sent a message is no longer "typing".
       snap.docChanges().forEach((c) => {
         if (c.type === 'added') delete typingMap[c.doc.data().senderId];
@@ -369,6 +383,14 @@
       });
       if (changed) renderTyping();
     }, 1000);
+
+    docsUnsub = teamRef.collection('docs').orderBy('updatedAt', 'desc').onSnapshot((snap) => {
+      renderDocs(snap.docs);
+    }, (err) => {
+      console.warn('docs listener: ' + (err && err.code ? err.code : err) + ' — publish the Firestore rules from README.md (the /docs block).', err);
+      const l = $('docs-list');
+      if (l) l.innerHTML = '<div class="empty-hint">Could not load docs. Publish the updated Firestore rules from README.md (the /docs block).</div>';
+    });
 
     rewardsUnsub = teamRef.collection('rewards').orderBy('createdAt', 'desc').onSnapshot((snap) => {
       renderRewards(snap.docs);
@@ -740,8 +762,41 @@
     setTimeout(() => node.classList.remove('flash'), 1400);
   }
 
+
   function buildMessage(doc) {
     const msg = doc.data();
+
+    // Old-style "📄 Shared a doc" bubbles with a card are no longer shown: only the single doc line below appears.
+    if (msg.kind !== 'system' && msg.sharedDocRef && msg.sharedDocRef.id) {
+      const legacy = mk('div', 'chat-system');
+      legacy.dataset.id = doc.id;
+      legacy.hidden = true;
+      legacy.style.display = 'none';
+      return legacy;
+    }
+
+    // The one doc message: a rectangular line ("Rahul added you to …") with a button that opens the doc popup.
+    if (msg.kind === 'system') {
+      const sys = mk('div', 'chat-system');
+      sys.dataset.id = doc.id;
+      if (msg.sharedDocRef && msg.sharedDocRef.id) {
+        const link = mk('button', 'chat-system-doc');
+        link.type = 'button';
+        link.innerHTML = '<i class="fa-solid fa-file-lines"></i><span>' + escapeHtml(msg.sharedDocRef.title || 'Shared doc') +
+          '</span><i class="fa-solid fa-arrow-up-right-from-square"></i>';
+        link.addEventListener('click', () => {
+          if (!teamDocs.some((x) => x.id === msg.sharedDocRef.id)) { alert('This doc is no longer available (it may have been deleted).'); return; }
+          openDocModal(msg.sharedDocRef.id);
+        });
+        sys.appendChild(mk('span', 'chat-system-text', msg.text || ''));
+        sys.appendChild(link);
+      } else {
+        sys.appendChild(mk('span', 'chat-system-text', msg.text || ''));
+      }
+      sys.appendChild(mk('span', 'time', formatTime(msg.createdAt)));
+      return sys;
+    }
+
     const mine = msg.senderId === currentUser.uid;
     const node = mk('div', 'chat-msg' + (mine ? ' mine' : ''));
     node.dataset.id = doc.id;
@@ -796,6 +851,11 @@
   // Time, delivery ticks, "Seen by …" and delete-button visibility — cheap to redo whenever anything changes.
   function updateMessageMeta(node, doc, isLastMine) {
     const msg = doc.data({ serverTimestamps: 'estimate' });
+    if (msg.kind === 'system' || (msg.sharedDocRef && msg.sharedDocRef.id)) {
+      const time = node.querySelector('.time');
+      if (time) time.textContent = formatTime(msg.createdAt);
+      return;
+    }
     const mine = msg.senderId === currentUser.uid;
     node.querySelector('.time').textContent = formatTime(msg.createdAt);
     node.querySelector('.msg-del').hidden = !(mine || isOwner());
@@ -805,7 +865,8 @@
     if (!mine) { ticks.hidden = true; label.hidden = true; return; }
 
     const ts = msg.createdAt && msg.createdAt.toMillis ? msg.createdAt.toMillis() : 0;
-    const others = Object.keys((currentTeamData && currentTeamData.members) || {}).filter((u) => u !== currentUser.uid);
+    const memberSet = new Set([].concat(Object.keys((currentTeamData && currentTeamData.members) || {}), (currentTeamData && currentTeamData.memberIds) || []));
+    const others = Array.from(memberSet).filter((u) => u !== currentUser.uid);
     const seen = ts ? others.filter((u) => (readsMap[u] || 0) >= ts) : [];
     const names = seen.map(memberName);
 
@@ -816,7 +877,7 @@
     else if (seen.length) {
       icon = 'fa-solid fa-check-double';
       title = 'Seen by ' + names.join(', ');
-      if (seen.length === others.length) cls += ' seen';
+      cls += ' seen';                       // green double tick as soon as someone has read it
     }
     ticks.hidden = false;
     ticks.className = cls;
@@ -1095,18 +1156,503 @@
     $('reward-title-input').value = '';
   }
 
+
+  // ---------- Shared docs (read / write per doc) ----------
+  // The rules of the game for a shared doc:
+  //   * permission 'read'  -> the doc is LOCKED. Only the person who shared it may type,
+  //                           and only that person can ever open it up again. No teammate
+  //                           (not even the team owner) can write, and nobody but the
+  //                           owner can flip read -> write.
+  //   * permission 'write' -> every member can type, autosaves as they go.
+  // Both rules are enforced twice: in the UI here and in the Firestore rules
+  // (README.md), so a hand-edited client still cannot write to a locked doc.
+
+  const Docs = window.InfiniteDocs;
+  const DOC_MAX = Docs.DOC_MAX;
+
+  // Docs are written by other people, so everything is rendered through this whitelist.
+  function cleanDocHtml(html) { return Docs.clean(html); }
+
+  function tsMs(ts) { return ts && ts.toMillis ? ts.toMillis() : 0; }
+  function permLabel(p) { return p === 'write' ? 'Can edit' : 'View only'; }
+  // Every "may I touch this doc" question goes through the one shared ACL in
+  // doc-attrib.js, so the Team page and the Notepad can never disagree about it.
+  function amTeamMember() {
+    const ids = currentTeamData && currentTeamData.memberIds;
+    return !!(currentUser && Array.isArray(ids) && ids.indexOf(currentUser.uid) !== -1);
+  }
+  function docAcl(d) { return Docs.acl(d, currentUser && currentUser.uid, isOwner() ? currentUser.uid : null, amTeamMember()); }
+  function isDocOwner(d) { return docAcl(d).owner; }
+  function docCanEdit(d) { return docAcl(d).canEdit; }
+  function docIsLocked(d) { return docAcl(d).locked; }
+  function docCanDelete(d) { return docAcl(d).canDelete; }
+  function docsCol() { return window.lifeIsShortDb.collection('teams').doc(currentTeamId).collection('docs'); }
+
+  // Straight from the live snapshot — every write path re-checks with these two.
+  function liveDoc(id) { return teamDocs.find((x) => x.id === id) || null; }
+  function liveCanEdit(id) { const cur = liveDoc(id); return !!(cur && docCanEdit(cur.data())); }
+
+  // Stamp WHO WROTE WHICH PART: new / changed lines get my name, everything that is
+  // still identical to the stored copy keeps the name it already had.
+  function tagContribution(html, d) {
+    return Docs.attribute(html, (d && d.body) || '',
+      { id: currentUser ? currentUser.uid : '', name: displayName() },
+      { id: (d && d.ownerId) || '', name: (d && d.ownerName) || 'Someone' });
+  }
+
+  function writtenByLabel(d) {
+    const list = Docs.names((d && d.body) || '', (d && d.ownerId) || '');
+    if (!list.length) return '';
+    return ' · added by ' + list.slice(0, 4).join(', ') + (list.length > 4 ? ' +' + (list.length - 4) + ' more' : '');
+  }
+
+
+  function setDocStatus(msg, bad) {
+    const el = $('doc-status');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.style.color = bad ? 'var(--red)' : '';
+  }
+
+  function resetDocsState() {
+    clearTimeout(docSaveTimer);
+    docSaveTimer = null;
+    clearTimeout(modalSaveTimer);
+    modalSaveTimer = null;
+    closeDocModal(true);
+    teamDocs = [];
+    openDocId = null;
+    pendingOpenDocId = null;
+    docLoadedAt = 0;
+    lockAllDocSurfaces();
+    const v = $('doc-viewer'), l = $('docs-list-view');
+    if (v) v.hidden = true;
+    if (l) l.hidden = false;
+    const c = $('docs-count');
+    if (c) c.textContent = '0';
+    const list = $('docs-list');
+    if (list) list.innerHTML = '<div class="empty-hint">Loading docs…</div>';
+  }
+
+  function renderDocs(docs) {
+    teamDocs = docs;
+    const cnt = $('docs-count');
+    if (cnt) cnt.textContent = String(docs.length);
+
+    if (openDocId) {
+      const cur = docs.find((x) => x.id === openDocId);
+      if (!cur) closeDocViewer(true);          // deleted by someone else
+      else fillViewer(cur, false);
+    }
+    if (pendingOpenDocId) {
+      const p = docs.find((x) => x.id === pendingOpenDocId);
+      if (p) { pendingOpenDocId = null; openDoc(p.id); }
+    }
+
+    // The chat popup stays live: it reuses the same docs listener, so teammate edits land there too.
+    if (modalDocId) {
+      const cur = docs.find((x) => x.id === modalDocId);
+      if (!cur) closeDocModal(true);
+      else fillDocModal(cur, false);
+    }
+
+    const list = $('docs-list');
+    if (!list) return;
+    if (!docs.length) {
+      list.innerHTML = '<div class="empty-hint">No shared docs yet. Create one above, or press <b>Share with team</b> in Notepad &amp; Docs.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    docs.forEach((doc) => {
+      const d = doc.data({ serverTimestamps: 'estimate' });
+      const row = mk('div', 'doc-row');
+      row.tabIndex = 0;
+      const who = Docs.names(d.body || '', d.ownerId || '');
+      row.innerHTML = '<i class="fa-solid fa-file-lines doc-ico"></i>' +
+        '<div class="doc-row-main"><b>' + escapeHtml(d.title || 'Untitled doc') + '</b><span>' +
+        escapeHtml(d.ownerName || 'Someone') + ' · ' + escapeHtml(formatTime(d.updatedAt) || 'just now') +
+        (d.updatedBy && d.updatedBy !== d.ownerId ? ' · edited by ' + escapeHtml(d.updatedByName || 'a member') : '') +
+        (who.length ? ' · written with ' + escapeHtml(who.slice(0, 3).join(', ')) + (who.length > 3 ? ' +' + (who.length - 3) + ' more' : '') : '') +
+        '</span></div>';
+      // Access control: only the person who shared the doc can flip it from here, and
+      // read -> write asks first. Everyone else only sees the state — and the Firestore
+      // rules refuse the same change server side, so a tampered row cannot help either.
+      const badge = mk('span', 'perm-badge ' + (d.permission === 'write' ? 'edit' : 'view'));
+      badge.innerHTML = (d.permission === 'write' ? '<i class="fa-solid fa-pen"></i>' : '<i class="fa-solid fa-lock"></i>') + ' ' + permLabel(d.permission);
+      if (isDocOwner(d)) {
+        badge.classList.add('is-toggle');
+        badge.tabIndex = 0;
+        badge.title = 'Change who can edit this doc';
+        const flip = async (e) => {
+          e.stopPropagation();
+          const wanted = d.permission === 'write' ? 'read' : 'write';
+          if (wanted === 'write' && !confirm('Open “' + (d.title || 'this doc') + '” so everyone in the team can edit it?\nYou can lock it again any time.')) return;
+          try { await doc.ref.update({ permission: wanted }); }
+          catch (error) { alert('Could not change permission: ' + (error && error.message ? error.message : error)); }
+        };
+        badge.addEventListener('click', flip);
+        badge.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(e); } });
+      } else {
+        badge.title = d.permission === 'write'
+          ? 'Everyone in this team can edit — only ' + (d.ownerName || 'the owner') + ' can change this'
+          : 'Locked (view only) — only ' + (d.ownerName || 'the owner') + ' can let people edit';
+      }
+      row.appendChild(badge);
+      if (docCanDelete(d)) {
+        const del = mk('button', 'doc-row-del');
+        del.type = 'button';
+        del.title = 'Delete doc';
+        del.setAttribute('aria-label', 'Delete doc');
+        del.innerHTML = '<i class="fa-regular fa-trash-can"></i>';
+        del.addEventListener('click', (e) => { e.stopPropagation(); deleteDoc(doc.id); });
+        row.appendChild(del);
+      }
+      row.addEventListener('click', () => openDoc(doc.id));
+      row.addEventListener('keydown', (e) => { if (e.key === 'Enter') openDoc(doc.id); });
+      list.appendChild(row);
+    });
+
+  }
+
+  // Docs tab rows now open the same big scrollable popup as the chat link (no inline viewer any more).
+  function openDoc(id, switchTab) {
+    if (!teamDocs.some((x) => x.id === id)) return;
+    if (switchTab) showTab('docs');
+    openDocModal(id);
+  }
+
+  function closeDocViewer(silent) {
+    if (docSaveTimer && !silent) saveDoc();
+    clearTimeout(docSaveTimer);
+    docSaveTimer = null;
+    openDocId = null;
+    docLoadedAt = 0;
+    setDocStatus('');
+    $('doc-viewer').hidden = true;
+    $('docs-list-view').hidden = false;
+  }
+
+  // Lock one doc surface without a doc. Everything starts locked and is only opened
+  // by applyDocMode once a real snapshot has proved the viewer may write, so a doc
+  // that is still loading, or a viewer who is not allowed in, is never editable.
+  function lockDocSurface(prefix) {
+    const titleEl = $(prefix + '-title'), bodyEl = $(prefix + '-body'), bar = $(prefix + '-toolbar');
+    if (titleEl) {
+      titleEl.readOnly = true;
+      titleEl.setAttribute('aria-readonly', 'true');
+    }
+    if (bodyEl) {
+      bodyEl.contentEditable = 'false';
+      bodyEl.setAttribute('aria-readonly', 'true');
+      bodyEl.setAttribute('spellcheck', 'false');
+      bodyEl.classList.add('doc-locked');
+    }
+    if (bar) {
+      bar.hidden = true;
+      bar.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    }
+  }
+
+  function lockAllDocSurfaces() {
+    lockDocSurface('doc');
+    lockDocSurface('doc-modal');
+  }
+
+  // Lock or unlock one doc surface ('doc' = Docs tab viewer, 'doc-modal' = chat popup).
+  // Runs on every snapshot, so if the owner locks the doc while you are reading it,
+  // the surface goes read-only straight away.
+  function applyDocMode(prefix, d) {
+    const acl = docAcl(d);
+    const can = acl.canEdit, locked = acl.locked, owner = acl.owner;
+    const titleEl = $(prefix + '-title'), bodyEl = $(prefix + '-body'), bar = $(prefix + '-toolbar');
+
+    if (titleEl) {
+      titleEl.readOnly = !can;
+      titleEl.setAttribute('aria-readonly', can ? 'false' : 'true');
+    }
+    if (bodyEl) {
+      bodyEl.contentEditable = can ? 'true' : 'false';
+      bodyEl.setAttribute('aria-readonly', can ? 'false' : 'true');
+      bodyEl.setAttribute('spellcheck', can ? 'true' : 'false');
+      bodyEl.classList.toggle('doc-locked', locked);
+    }
+    if (bar) {
+      bar.hidden = !can;
+      bar.querySelectorAll('button').forEach((b) => { b.disabled = !can; });
+    }
+
+    // Access control: rendered for the doc owner only. Hidden AND disabled for
+    // everybody else, so no teammate can ever switch a locked doc back to "can edit".
+    const sel = $(prefix + '-perm-select'), badge = $(prefix + '-perm-badge');
+    if (sel) {
+      sel.hidden = !owner;
+      sel.disabled = !owner;
+      if (owner) sel.value = acl.perm;
+    }
+    if (badge) {
+      badge.hidden = owner;
+      badge.className = 'perm-badge ' + (acl.perm === 'write' ? 'edit' : 'view');
+      badge.innerHTML = (acl.perm === 'write' ? '<i class="fa-solid fa-pen"></i>' : '<i class="fa-solid fa-lock"></i>') +
+        ' ' + permLabel(acl.perm);
+      badge.title = acl.perm === 'write'
+        ? 'Everyone in this team can edit this doc'
+        : 'Locked — only ' + ((d.ownerName || 'the owner') + ' can let people edit');
+    }
+    const del = $(prefix + '-delete');
+    if (del) del.hidden = !acl.canDelete;
+    return acl;
+  }
+
+  function docMetaText(d, can) {
+    const ownerName = d.ownerName || 'Someone';
+    return 'By ' + ownerName +
+      (d.updatedAt ? ' · last edited ' + formatTime(d.updatedAt) + (d.updatedByName ? ' by ' + d.updatedByName : '') : '') +
+      writtenByLabel(d) +
+      (can ? '' : ' · locked (view only) — only ' + ownerName + ' can change this');
+  }
+
+  function fillViewer(doc, force) {
+    const d = doc.data({ serverTimestamps: 'estimate' });
+    const bodyEl = $('doc-body');
+    const titleEl = $('doc-title');
+    const stamp = tsMs(d.updatedAt);
+    const editing = document.activeElement === bodyEl || document.activeElement === titleEl;
+    const locked = docIsLocked(d);
+
+    if (force || locked || (!editing && stamp !== docLoadedAt)) {
+      titleEl.value = d.title || '';
+      bodyEl.innerHTML = cleanDocHtml(d.body);
+      docLoadedAt = stamp;
+      $('doc-notice').hidden = true;
+    } else if (editing && stamp !== docLoadedAt) {
+      if (d.updatedBy === (currentUser && currentUser.uid)) docLoadedAt = stamp;   // that was my own save coming back
+      else $('doc-notice').hidden = false;                                          // don't clobber what they're typing
+    }
+
+    const mode = applyDocMode('doc', d);
+    $('doc-meta').textContent = docMetaText(d, mode.canEdit);
+    if (!docSaveTimer) setDocStatus(mode.canEdit ? 'Autosaves as you type' : 'View only');
+  }
+
+
+  // Show the freshly stored stamps (who wrote what) without ever moving the caret.
+  function showStampsOn(el, html) {
+    if (!el || document.activeElement === el) return;
+    if (el.innerHTML !== html) el.innerHTML = html;
+  }
+
+  function scheduleDocSave() {
+    if (!liveCanEdit(openDocId)) return;                      // read-only: nothing to save
+    clearTimeout(docSaveTimer);
+    setDocStatus('Editing…');
+    docSaveTimer = setTimeout(saveDoc, 700);
+  }
+
+  async function saveDoc() {
+    clearTimeout(docSaveTimer);
+    docSaveTimer = null;
+    const cur = liveDoc(openDocId);
+    if (!cur) return;
+    const d = cur.data();
+    if (!docCanEdit(d)) {                                      // access changed while typing
+      setDocStatus('Access changed — this doc is view only now', true);
+      fillViewer(cur, true);
+      return;
+    }
+    const html = tagContribution(cleanDocHtml($('doc-body').innerHTML), d);
+    if (html.length > DOC_MAX) { setDocStatus('Too large to save (limit ≈ 200 KB)', true); return; }
+    setDocStatus('Saving…');
+    try {
+      await cur.ref.update({
+        title: ($('doc-title').value || '').trim().slice(0, 120) || 'Untitled doc',
+        body: html,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedBy: currentUser.uid,
+        updatedByName: displayName()
+      });
+      showStampsOn($('doc-body'), html);
+      if (!docSaveTimer) setDocStatus('Saved ✓');
+    } catch (error) {
+      console.error('saveDoc failed', error);
+      setDocStatus('Could not save: ' + (error && error.code === 'permission-denied' ? 'this doc is view only for you (or the /docs rules are not published)' : (error && error.message) || error), true);
+    }
+  }
+
+  // Only the person who shared the doc can ever get here — and the Firestore rules
+  // say the same thing, so read -> write cannot be forced from a teammate's browser.
+  async function changeDocPermission(prefix, id) {
+    const sel = $(prefix + '-perm-select');
+    if (!sel || !currentUser) return;
+    const cur = liveDoc(id);
+    const d = cur ? cur.data() : null;
+    const stored = d && d.permission === 'write' ? 'write' : 'read';
+    if (!cur || !isDocOwner(d)) {
+      if (d) sel.value = stored;
+      alert('Only ' + ((d && d.ownerName) || 'the owner') + ' can change who can edit this doc.');
+      return;
+    }
+    const wanted = sel.value === 'write' ? 'write' : 'read';
+    if (wanted === stored) return;
+    if (wanted === 'write' && !confirm('Open this doc up so everyone in the team can edit it?\nYou can lock it again any time.')) {
+      sel.value = 'read';
+      return;
+    }
+    try { await cur.ref.update({ permission: wanted }); }
+    catch (error) { alert('Could not change permission: ' + (error && error.message ? error.message : error)); }
+  }
+
+
+  // ---------- Big popup viewer (docs opened from a chat card) ----------
+  // Same doc record and same live listener as the Docs tab, just a second surface
+  // with its own id prefix so both can be open at the same time.
+
+  function setModalStatus(msg, bad) {
+    const el = $('doc-modal-status');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.style.color = bad ? 'var(--red)' : '';
+  }
+
+  function openDocModal(id) {
+    const doc = teamDocs.find((x) => x.id === id);
+    if (!doc) { alert('This doc is no longer available (it may have been deleted).'); return; }
+    modalDocId = id;
+    modalLoadedAt = 0;
+    const dlg = $('doc-modal');
+    if (dlg && !dlg.open) dlg.showModal();
+    fillDocModal(doc, true);
+  }
+
+  function closeDocModal(silent) {
+    if (modalSaveTimer && !silent) saveDocModal();
+    clearTimeout(modalSaveTimer);
+    modalSaveTimer = null;
+    modalDocId = null;
+    modalLoadedAt = 0;
+    setModalStatus('');
+    const dlg = $('doc-modal');
+    if (dlg && dlg.open) dlg.close();
+  }
+
+  function fillDocModal(doc, force) {
+    const d = doc.data({ serverTimestamps: 'estimate' });
+    const titleEl = $('doc-modal-title'), bodyEl = $('doc-modal-body');
+    const stamp = tsMs(d.updatedAt);
+    const editing = document.activeElement === bodyEl || document.activeElement === titleEl;
+    const locked = docIsLocked(d);
+
+    if (force || locked || (!editing && stamp !== modalLoadedAt)) {
+      titleEl.value = d.title || '';
+      bodyEl.innerHTML = cleanDocHtml(d.body);
+      modalLoadedAt = stamp;
+      $('doc-modal-notice').hidden = true;
+    } else if (editing && stamp !== modalLoadedAt) {
+      if (d.updatedBy === (currentUser && currentUser.uid)) modalLoadedAt = stamp;
+      else $('doc-modal-notice').hidden = false;
+    }
+
+    const mode = applyDocMode('doc-modal', d);
+    $('doc-modal-meta').textContent = docMetaText(d, mode.canEdit);
+    if (!modalSaveTimer) setModalStatus(mode.canEdit ? 'Autosaves as you type' : 'View only');
+  }
+
+
+  function scheduleDocModalSave() {
+    if (!liveCanEdit(modalDocId)) return;                        // read-only: nothing to save
+    clearTimeout(modalSaveTimer);
+    setModalStatus('Editing…');
+    modalSaveTimer = setTimeout(saveDocModal, 700);
+  }
+
+  async function saveDocModal() {
+    clearTimeout(modalSaveTimer);
+    modalSaveTimer = null;
+    const cur = liveDoc(modalDocId);
+    if (!cur) return;
+    const d = cur.data();
+    if (!docCanEdit(d)) {
+      setModalStatus('Access changed — this doc is view only now', true);
+      fillDocModal(cur, true);
+      return;
+    }
+    const html = tagContribution(cleanDocHtml($('doc-modal-body').innerHTML), d);
+    if (html.length > DOC_MAX) { setModalStatus('Too large to save (limit ≈ 200 KB)', true); return; }
+    setModalStatus('Saving…');
+    try {
+      await cur.ref.update({
+        title: ($('doc-modal-title').value || '').trim().slice(0, 120) || 'Untitled doc',
+        body: html,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedBy: currentUser.uid,
+        updatedByName: displayName()
+      });
+      showStampsOn($('doc-modal-body'), html);
+      if (!modalSaveTimer) setModalStatus('Saved ✓');
+    } catch (error) {
+      console.error('saveDocModal failed', error);
+      setModalStatus('Could not save: ' + (error && error.code === 'permission-denied' ? 'this doc is view only for you' : (error && error.message) || error), true);
+    }
+  }
+
+  async function changeDocModalPermission() {
+    await changeDocPermission('doc-modal', modalDocId);
+  }
+
+
+  function postDocMessage(teamId, docId, title, permission, verb) {
+    return window.lifeIsShortDb.collection('teams').doc(teamId).collection('messages').add({
+      senderId: currentUser.uid,
+      senderName: displayName(),
+      kind: 'system',
+      text: displayName() + ' ' + String(verb).toLowerCase() + ' "' + title + '" — ' + (permission === 'write' ? 'everyone can edit' : 'view only'),
+      sharedDocRef: { id: docId, title, permission },
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }
+
+  async function createDoc() {
+    if (!currentTeamId) return;
+    const input = $('new-doc-title');
+    const title = input.value.trim() || 'Untitled doc';
+    const permission = $('new-doc-perm').value === 'read' ? 'read' : 'write';
+    const ref = docsCol().doc();
+    const ts = firebase.firestore.FieldValue.serverTimestamp();
+    pendingOpenDocId = ref.id;
+    try {
+      await ref.set({
+        title, body: '', ownerId: currentUser.uid, ownerName: displayName(), permission,
+        createdAt: ts, updatedAt: ts, updatedBy: currentUser.uid, updatedByName: displayName()
+      });
+      input.value = '';
+      postDocMessage(currentTeamId, ref.id, title, permission, 'Created').catch(() => {});
+    } catch (error) {
+      pendingOpenDocId = null;
+      console.error('createDoc failed', error);
+      alert('Could not create the doc: ' + (error && error.message ? error.message : error) + '\n\nPublish the Firestore rules from README.md (the /docs block).');
+    }
+  }
+
+  async function deleteDoc(id) {
+    const doc = teamDocs.find((x) => x.id === id);
+    if (!doc || !docCanDelete(doc.data())) return;
+    if (!confirm('Delete "' + (doc.data().title || 'Untitled doc') + '" for everyone in the team?')) return;
+    try { await doc.ref.delete(); }
+    catch (error) { alert('Could not delete the doc: ' + (error && error.message ? error.message : error)); }
+  }
+
   // ---------- Wiring ----------
+
+  function showTab(name) {
+    document.querySelectorAll('.team-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+    ['goals', 'docs', 'rewards', 'members'].forEach((n) => {
+      const panel = $('tab-' + n);
+      if (panel) panel.hidden = n !== name;
+    });
+  }
 
   function setupTabs() {
     document.querySelectorAll('.team-tab').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.team-tab').forEach((b) => b.classList.remove('active'));
-        ['goals', 'rewards', 'members'].forEach((name) => {
-          const panel = $('tab-' + name);
-          if (panel) panel.hidden = name !== btn.dataset.tab;
-        });
-        btn.classList.add('active');
-      });
+      btn.addEventListener('click', () => showTab(btn.dataset.tab));
     });
   }
 
@@ -1116,6 +1662,77 @@
     $('leave-team-btn').addEventListener('click', leaveTeam);
     $('add-goal-btn').addEventListener('click', addGoal);
     $('add-reward-btn').addEventListener('click', addReward);
+    $('add-doc-btn').addEventListener('click', createDoc);
+    $('new-doc-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); createDoc(); } });
+    $('doc-back').addEventListener('click', () => closeDocViewer(false));
+    $('doc-delete').addEventListener('click', () => { if (openDocId) deleteDoc(openDocId); });
+    $('doc-perm-select').addEventListener('change', () => changeDocPermission('doc', openDocId));
+    // Read-only is enforced for real here: while the doc is locked nothing can change
+    // the body or the title. contentEditable=false already blocks typing, these
+    // guards catch the rest (paste, drop, hand-made events from the console).
+    const docGuard = () => liveCanEdit(openDocId);
+    $('doc-title').addEventListener('beforeinput', (e) => { if (!docGuard()) e.preventDefault(); });
+    $('doc-body').addEventListener('beforeinput', (e) => { if (!docGuard()) e.preventDefault(); });
+    $('doc-title').addEventListener('input', scheduleDocSave);
+    $('doc-body').addEventListener('input', scheduleDocSave);
+    ['paste', 'drop'].forEach((evt) => {
+      $('doc-body').addEventListener(evt, (e) => {
+        e.preventDefault();
+        if (!docGuard() || evt !== 'paste') return;   // locked: nothing gets in; drops stay plain
+        document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+      });
+    });
+    $('doc-reload').addEventListener('click', () => {
+      const cur = teamDocs.find((x) => x.id === openDocId);
+      if (cur) fillViewer(cur, true);
+    });
+    document.querySelectorAll('[data-doc-cmd]').forEach((b) => {
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', () => {
+        if (!docGuard()) return;                      // read-only: no formatting either
+        document.execCommand(b.dataset.docCmd, false, b.dataset.value || null);
+        scheduleDocSave();
+      });
+    });
+
+    window.addEventListener('beforeunload', () => { if (docSaveTimer) saveDoc(); if (modalSaveTimer) saveDocModal(); });
+
+    // Big popup opened from a chat doc card
+    $('doc-modal-close').addEventListener('click', () => closeDocModal(false));
+    $('doc-modal-delete').addEventListener('click', () => { if (modalDocId) deleteDoc(modalDocId); });
+    $('doc-modal-perm-select').addEventListener('change', changeDocModalPermission);
+    const modalGuard = () => liveCanEdit(modalDocId);
+    $('doc-modal-title').addEventListener('beforeinput', (e) => { if (!modalGuard()) e.preventDefault(); });
+    $('doc-modal-body').addEventListener('beforeinput', (e) => { if (!modalGuard()) e.preventDefault(); });
+    $('doc-modal-title').addEventListener('input', scheduleDocModalSave);
+    $('doc-modal-body').addEventListener('input', scheduleDocModalSave);
+    ['paste', 'drop'].forEach((evt) => {
+      $('doc-modal-body').addEventListener(evt, (e) => {
+        e.preventDefault();
+        if (!modalGuard() || evt !== 'paste') return;
+        document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+      });
+    });
+    $('doc-modal-reload').addEventListener('click', () => {
+      const cur = teamDocs.find((x) => x.id === modalDocId);
+      if (cur) fillDocModal(cur, true);
+    });
+    document.querySelectorAll('[data-modal-doc-cmd]').forEach((b) => {
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', () => {
+        if (!modalGuard()) return;
+        document.execCommand(b.dataset.modalDocCmd, false, b.dataset.value || null);
+        scheduleDocModalSave();
+      });
+    });
+
+    $('doc-modal').addEventListener('cancel', (e) => { e.preventDefault(); closeDocModal(false); });
+    $('doc-modal').addEventListener('close', () => {
+      clearTimeout(modalSaveTimer);
+      modalSaveTimer = null;
+      modalDocId = null;
+      modalLoadedAt = 0;
+    });
     $('chat-form').addEventListener('submit', sendMessage);
     $('chat-input').addEventListener('input', onChatInput);
     $('chat-input').addEventListener('blur', stopTyping);
@@ -1140,6 +1757,10 @@
     $('reply-bar-close').addEventListener('click', clearReply);
     // "Seen" only counts while the chat is actually in front of the user.
     document.addEventListener('visibilitychange', scheduleMarkRead);
+    window.addEventListener('pageshow', scheduleMarkRead);
+    document.addEventListener('click', scheduleMarkRead, true);
+    document.addEventListener('touchstart', scheduleMarkRead, { capture: true, passive: true });
+    setInterval(() => { if (document.visibilityState === 'visible') scheduleMarkRead(); }, 15000);
     window.addEventListener('focus', scheduleMarkRead);
     window.addEventListener('pagehide', stopTyping);
     $('copy-invite-btn').addEventListener('click', () => {
@@ -1162,6 +1783,7 @@
     setupAuthForm();
     setupTabs();
     setupStaticButtons();
+    lockAllDocSurfaces();          // read-only until a snapshot says otherwise
     const syncTopbar = () => {
       const tb = document.querySelector('.topbar');
       if (tb) document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');

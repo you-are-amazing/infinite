@@ -6,7 +6,7 @@
   <title>Team Goals - Infinite</title>
   <meta name="description" content="Create or join a team, share goals, chat and cheer each other on.">
   <link rel="icon" href="../deserve.png" type="image/png">
-  <link rel="stylesheet" href="../static/css/style.css?v=29">
+  <link rel="stylesheet" href="../static/css/style.css?v=32">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -14,8 +14,9 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
-  <script src="../static/js/auth.js?v=7" defer></script>
-  <script src="../static/js/team.js?v=7" defer></script>
+  <script src="../static/js/auth.js?v=8" defer></script>
+  <script src="../static/js/doc-attrib.js?v=2" defer></script>
+  <script src="../static/js/team.js?v=12" defer></script>
   <script src="../static/js/team-notify.js?v=3" defer></script>
 </head>
 <body>
@@ -131,6 +132,7 @@
 
         <div class="team-tabs">
           <button type="button" class="team-tab active" data-tab="goals"><i class="fa-solid fa-bullseye"></i>Goals</button>
+          <button type="button" class="team-tab" data-tab="docs"><i class="fa-solid fa-file-lines"></i>Docs <span class="cnt" id="docs-count">0</span></button>
           <button type="button" class="team-tab" data-tab="rewards"><i class="fa-solid fa-trophy"></i>Wins</button>
           <button type="button" class="team-tab" data-tab="members"><i class="fa-solid fa-user-group"></i>Members</button>
         </div>
@@ -150,6 +152,44 @@
             <button type="button" id="add-goal-btn" class="btn btn-green"><i class="fa-solid fa-plus"></i>Add goal</button>
           </div>
           <div id="goals-list"><div class="empty-hint">Loading goals…</div></div>
+        </div>
+
+        <div id="tab-docs" class="panel" hidden>
+          <div id="docs-list-view">
+            <div class="commit-row">
+              <input type="text" id="new-doc-title" maxlength="120" placeholder="New doc title — e.g. 'Sprint plan'…">
+              <select id="new-doc-perm" aria-label="Team permission">
+                <option value="write">Team can edit</option>
+                <option value="read">Team can view only</option>
+              </select>
+              <button type="button" id="add-doc-btn" class="btn btn-green"><i class="fa-solid fa-plus"></i>New doc</button>
+            </div>
+            <div id="docs-list"><div class="empty-hint">Loading docs…</div></div>
+          </div>
+
+          <div id="doc-viewer" class="doc-viewer" hidden>
+            <div class="doc-viewer-bar">
+              <button type="button" id="doc-back" class="btn btn-quiet"><i class="fa-solid fa-arrow-left"></i>All docs</button>
+              <span id="doc-status" class="doc-status"></span>
+              <select id="doc-perm-select" aria-label="Team permission for this doc" hidden>
+                <option value="write">Team can edit</option>
+                <option value="read">Team can view only</option>
+              </select>
+              <span id="doc-perm-badge" class="perm-badge"></span>
+              <button type="button" id="doc-delete" class="btn btn-quiet" title="Delete doc" aria-label="Delete doc" hidden><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+            <input type="text" id="doc-title" class="doc-title" maxlength="120" placeholder="Untitled doc" aria-label="Doc title">
+            <div class="doc-meta" id="doc-meta"></div>
+            <div class="doc-notice" id="doc-notice" hidden>Someone else edited this doc. <button type="button" id="doc-reload">Load latest</button></div>
+            <div class="doc-toolbar" id="doc-toolbar" role="toolbar" aria-label="Text formatting">
+              <button type="button" data-doc-cmd="bold" aria-label="Bold"><b>B</b></button>
+              <button type="button" data-doc-cmd="italic" aria-label="Italic"><i>I</i></button>
+              <button type="button" data-doc-cmd="underline" aria-label="Underline"><u>U</u></button>
+              <button type="button" data-doc-cmd="insertUnorderedList" aria-label="Bulleted list">&bull;</button>
+              <button type="button" data-doc-cmd="formatBlock" data-value="blockquote" aria-label="Quote">&ldquo;</button>
+            </div>
+            <div id="doc-body" class="doc-body" contenteditable="false" role="textbox" aria-label="Doc body"></div>
+          </div>
         </div>
 
         <div id="tab-rewards" class="panel" hidden>
@@ -245,6 +285,34 @@
       <button type="submit" class="auth-button auth-button-primary" id="password-submit">Update password</button>
       <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
     </form>
+  </dialog>
+
+  <!-- Big shared-doc popup (opened from a chat doc card) -->
+  <dialog id="doc-modal" class="doc-modal">
+    <div class="doc-modal-head">
+      <span class="doc-modal-kicker"><i class="fa-solid fa-file-lines"></i> SHARED DOC</span>
+      <button type="button" id="doc-modal-close" class="btn btn-quiet" aria-label="Close doc"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="doc-viewer-bar">
+      <span id="doc-modal-status" class="doc-status"></span>
+      <select id="doc-modal-perm-select" aria-label="Team permission for this doc" hidden>
+        <option value="write">Team can edit</option>
+        <option value="read">Team can view only</option>
+      </select>
+      <span id="doc-modal-perm-badge" class="perm-badge"></span>
+      <button type="button" id="doc-modal-delete" class="btn btn-quiet" title="Delete doc" aria-label="Delete doc" hidden><i class="fa-regular fa-trash-can"></i></button>
+    </div>
+    <input type="text" id="doc-modal-title" class="doc-title" maxlength="120" placeholder="Untitled doc" aria-label="Doc title">
+    <div class="doc-meta" id="doc-modal-meta"></div>
+    <div class="doc-notice" id="doc-modal-notice" hidden>Someone else edited this doc. <button type="button" id="doc-modal-reload">Load latest</button></div>
+    <div class="doc-toolbar" id="doc-modal-toolbar" role="toolbar" aria-label="Text formatting">
+      <button type="button" data-modal-doc-cmd="bold" aria-label="Bold"><b>B</b></button>
+      <button type="button" data-modal-doc-cmd="italic" aria-label="Italic"><i>I</i></button>
+      <button type="button" data-modal-doc-cmd="underline" aria-label="Underline"><u>U</u></button>
+      <button type="button" data-modal-doc-cmd="insertUnorderedList" aria-label="Bulleted list">&bull;</button>
+      <button type="button" data-modal-doc-cmd="formatBlock" data-value="blockquote" aria-label="Quote">&ldquo;</button>
+    </div>
+    <div id="doc-modal-body" class="doc-body" contenteditable="false" role="textbox" aria-label="Doc body"></div>
   </dialog>
 
   <script>
