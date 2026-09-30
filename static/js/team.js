@@ -52,6 +52,7 @@
   let forceScroll = false;
   let readTimer = null;
   let lastReadWriteFor = 0;
+  let readRetries = 0;             // retries left for a denied/failed receipt write
   let replyTo = null;              // { id, name, text } of the message being replied to
   const msgEls = new Map();       // messageId -> element (so updates never rebuild the whole list)
 
@@ -326,10 +327,12 @@
       snap.docChanges().forEach((c) => {
         if (c.type === 'removed') { delete readsMap[c.doc.id]; return; }
         const d = c.doc.data({ serverTimestamps: 'estimate' });
-        readsMap[c.doc.id] = d.at && d.at.toMillis ? d.at.toMillis() : 0;
+        // msgAt = exact time of the newest message they read. Older receipts only have at.
+        readsMap[c.doc.id] = Number(d.msgAt) || (d.at && d.at.toMillis ? d.at.toMillis() : 0);
       });
       refreshChat();
-    }, (err) => console.warn('reads listener', err));
+    }, (err) => console.warn('reads listener: ' + (err && err.code ? err.code : err) +
+      ' — if this is permission-denied, publish the Firestore rules from README.md (the /reads block).', err));
 
     // Typing indicator: teams/{id}/typing/{uid} exists only while someone is typing.
     typingUnsub = teamRef.collection('typing').onSnapshot((snap) => {
@@ -875,6 +878,7 @@
     chatInitial = true;
     forceScroll = false;
     lastReadWriteFor = 0;
+    readRetries = 0;
     clearReply();
     msgEls.clear();
     $('chat-messages').innerHTML = '<div class="chat-empty">Loading messages…</div>';
@@ -897,8 +901,8 @@
 
   function markChatRead() {
     if (!currentUser || !currentTeamId) return;
-    // Only count as "seen" when the chat is really in front of the user.
-    if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
+    // Count as "seen" while the chat is on screen (background tabs stay unread).
+    if (document.visibilityState !== 'visible') return;
 
     let newestOther = 0;
     let newestAny = 0;
@@ -912,8 +916,16 @@
     if (newestOther && newestOther > (readsMap[currentUser.uid] || 0) && lastReadWriteFor !== newestOther) {
       lastReadWriteFor = newestOther;
       window.lifeIsShortDb.collection('teams').doc(currentTeamId).collection('reads').doc(currentUser.uid)
-        .set({ name: displayName(), at: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
-        .catch((err) => console.warn('read receipt not saved (check Firestore rules for teams/{id}/reads)', err));
+        // msgAt is the exact time of the newest message they have read, so the sender compares
+        // two real message timestamps instead of two server clocks.
+        .set({ name: displayName(), at: firebase.firestore.FieldValue.serverTimestamp(), msgAt: newestOther }, { merge: true })
+        .then(() => { readRetries = 0; })
+        .catch((err) => {
+          lastReadWriteFor = 0;                      // let the next attempt try again
+          if (readRetries < 3) { readRetries++; setTimeout(scheduleMarkRead, 2500 * readRetries); }
+          console.warn('read receipt not saved: ' + (err && err.code ? err.code : err) +
+            '. If this is permission-denied, publish the Firestore rules from README.md (the /reads block).', err);
+        });
     }
     // Clears the bell / sidebar badge for this team.
     if (window.teamNotify) window.teamNotify.markRead(currentTeamId, newestAny);

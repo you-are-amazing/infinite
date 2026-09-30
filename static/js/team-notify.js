@@ -287,7 +287,8 @@
       const unsubRead = teamRef.collection('reads').doc(user.uid)
         .onSnapshot((snap) => {
           const d = snap.exists ? snap.data({ serverTimestamps: 'estimate' }) : null;
-          const at = d ? msOf(d.at) : 0;
+          // msgAt is the exact newest message time they read; older receipts only have at.
+          const at = d ? (Number(d.msgAt) || msOf(d.at)) : 0;
           if (!at) return;
           readAt[doc.id] = at;
           const before = items.length;
