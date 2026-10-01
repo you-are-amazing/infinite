@@ -297,6 +297,19 @@ export default {
         });
       }
 
+      // The root exists so opening the URL in a browser says something useful.
+      if (url.pathname === '/') {
+        return respond(request, env, {
+          name: 'Infinite AI',
+          status: 'running',
+          endpoints: {
+            health: '/health',
+            chat: 'POST /chat  (Authorization: Bearer <Firebase ID token>)',
+          },
+          configured: { hasToken: !!env.HF_TOKEN, hasFirebaseKey: !!env.FIREBASE_API_KEY },
+        });
+      }
+
       if (url.pathname !== '/chat') return respond(request, env, { error: 'Not found' }, 404);
       if (request.method !== 'POST') return respond(request, env, { error: 'Use POST' }, 405);
 
