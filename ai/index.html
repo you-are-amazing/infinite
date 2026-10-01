@@ -387,10 +387,14 @@
   }
   /* Same request and response shape as the callable, so the Worker can be swapped in and out. */
   function myData() {
+    /* Trim before sending: the Worker only reads 300 characters of each note, and a lean
+       body keeps it well inside the free plan's CPU budget. */
     return {
-      goals: rj('goals', []),
-      notes: rj('life_notes', []),
-      links: rj('life_inspire_links', []),
+      goals: rj('goals', []).slice(0, 60),
+      notes: rj('life_notes', []).slice(0, 25).map(function (n) {
+        return { title: n.title, body: String(n.body || '').slice(0, 1200) };
+      }),
+      links: rj('life_inspire_links', []).slice(0, 25),
     };
   }
   async function endpointCall(payload) {
