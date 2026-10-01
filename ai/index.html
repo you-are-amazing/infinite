@@ -224,6 +224,9 @@
 (function () {
   'use strict';
   var REGION = 'asia-south1';                         // keep identical to functions/index.js
+  /* Free backend: the URL of the private Hugging Face Space in ../ai-space (leave '' to use
+     the Firebase callable instead). The user only ever sends their Firebase ID token to it. */
+  var SPACE_URL = '';
   var KEY = 'infinite_ai_chats_v2', MAX_SEND = 20;
   var $ = function (id) { return document.getElementById(id); };
   var chats = [], cur = null, busy = false, callable = null;
@@ -342,11 +345,36 @@
     if (!window.firebase || !firebase.functions) throw new Error('Firebase Functions is not loaded.');
     return (callable = firebase.app().functions(REGION).httpsCallable('chat', { timeout: 90000 }));
   }
+  /* Same request and response shape as the callable, so the Space can be swapped in and out. */
+  async function spaceCall(payload) {
+    var u = user();
+    if (!u || typeof u.getIdToken !== 'function') throw new Error('Please sign in again, then retry.');
+    var res = await fetch(SPACE_URL.replace(/\/$/, '') + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await u.getIdToken() },
+      body: JSON.stringify(payload),
+    });
+    var data = null;
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      var err = new Error((data && data.error) || 'Infinite AI is unavailable right now.');
+      err.code = res.status === 401 ? 'unauthenticated' : res.status === 429 ? 'resource-exhausted'
+        : res.status === 503 ? 'unavailable' : 'internal';
+      throw err;
+    }
+    return { data: data || {} };
+  }
+  function ask(payload) {
+    if (!SPACE_URL) return fn()(payload);
+    return spaceCall(payload);
+  }
   function friendly(e) {
     var c = (e && e.code) || '';
     if (c.indexOf('unauthenticated') >= 0) return 'Please sign in again, then retry.';
     if (c.indexOf('resource-exhausted') >= 0) return e.message || 'Limit reached. Try again later.';
-    if (c.indexOf('not-found') >= 0 || c.indexOf('unavailable') >= 0) return 'Infinite AI is not deployed yet or is unreachable.';
+    if (c.indexOf('not-found') >= 0 || c.indexOf('unavailable') >= 0) return SPACE_URL
+      ? 'The free backend is waking up. Send that again in a moment.'
+      : 'Infinite AI is not deployed yet or is unreachable.';
     return (e && e.message) || 'Something went wrong. Please try again.';
   }
   function send(text) {
@@ -358,7 +386,7 @@
     cur.messages.push({ role: 'user', text: text.slice(0, 2000) }); cur.ts = Date.now();
     $('ax-input').value = ''; autosize(); busy = true; saveChats(); drawChats(); drawThread();
     var chat = cur, payload = chat.messages.slice(-MAX_SEND).map(function (m) { return { role: m.role, text: m.text }; }), p;
-    try { p = fn()({ messages: payload, today: todayStr() }); } catch (e) { p = Promise.reject(e); }
+    try { p = ask({ messages: payload, today: todayStr() }); } catch (e) { p = Promise.reject(e); }
     p.then(function (res) {
       var d = (res && res.data) || {};
       var acts = (d.proposed || []).map(function (a, i) { return { id: Date.now() + '-' + i, name: a.name, args: a.args, status: 'pending' }; });
