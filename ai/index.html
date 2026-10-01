@@ -227,7 +227,7 @@
   /* Free backend: the Cloudflare Worker URL (see ../ai-worker/README.md). Leave '' to use the
      Firebase callable instead. Either way the user sends their Firebase ID token and their own
      goals and notes, and gets back {reply, proposed}. */
-  var AI_ENDPOINT = '';
+  var AI_ENDPOINT = 'https://infinite-ai.darshan-infinite-ai.workers.dev';
   var KEY = 'infinite_ai_chats_v2', MAX_SEND = 20;
   var $ = function (id) { return document.getElementById(id); };
   var chats = [], cur = null, busy = false, callable = null;

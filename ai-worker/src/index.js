@@ -14,12 +14,15 @@
  * Nothing is written back: the browser shows a confirm card and applies the change locally.
  *
  * Secrets:  HF_TOKEN (wrangler secret put HF_TOKEN)
- * Vars:     FIREBASE_API_KEY, HF_MODEL (default Qwen/Qwen2.5-7B-Instruct), DAILY_LIMIT, ALLOWED_ORIGINS
+ * Vars:     FIREBASE_API_KEY, HF_MODEL (optional), DAILY_LIMIT, ALLOWED_ORIGINS
  */
 
 const HF_ENDPOINT = 'https://router.huggingface.co/v1/chat/completions';
 const IDENTITY_TOOLKIT = 'https://identitytoolkit.googleapis.com/v1/accounts:lookup';
-const DEFAULT_MODEL = 'Qwen/Qwen2.5-7B-Instruct';
+/* Free-tier models on the HF router, tried in order. A provider can drop a model at any
+   time, and "model_not_supported" is a 400 the caller never needs to see. */
+const DEFAULT_MODELS = ['Qwen/Qwen3-4B-Instruct-2507', 'meta-llama/Llama-3.1-8B-Instruct', 'google/gemma-3-4b-it'];
+const DEFAULT_MODEL = DEFAULT_MODELS[0];
 const DEFAULT_ORIGINS = [
   'https://you-are-amazing.github.io',
   'http://127.0.0.1:5500',
@@ -191,27 +194,36 @@ function systemPrompt(name, today, snapshot) {
 /* ---------------- model ---------------- */
 async function askModel(env, messages) {
   if (!env.HF_TOKEN) throw new HttpError(500, 'HF_TOKEN is not set on this Worker.');
-  const model = String(env.HF_MODEL || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
-  let response;
-  try {
-    response = await fetch(HF_ENDPOINT, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.HF_TOKEN}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, temperature: 0.6, max_tokens: MAX_TOKENS }),
-      signal: AbortSignal.timeout(60000),
-    });
-  } catch (e) {
-    throw new HttpError(502, 'The AI endpoint could not be reached. Try again in a minute.');
+  const configured = String(env.HF_MODEL || '').trim();
+  const models = configured ? [configured, ...DEFAULT_MODELS] : DEFAULT_MODELS;
+
+  let lastProblem = null;
+  for (const model of models) {
+    let response;
+    try {
+      response = await fetch(HF_ENDPOINT, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${env.HF_TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model, messages, temperature: 0.6, max_tokens: MAX_TOKENS }),
+        signal: AbortSignal.timeout(60000),
+      });
+    } catch (e) {
+      lastProblem = new HttpError(502, 'The AI endpoint could not be reached. Try again in a minute.');
+      continue;                                   // a network blip is worth one retry
+    }
+    if (response.status === 429) throw new HttpError(429, 'The free AI endpoint is busy right now. Try again in a minute.');
+    if (response.status === 400 || response.status === 404 || response.status >= 500) {
+      lastProblem = new HttpError(502, 'The AI endpoint is unavailable right now. Try again in a minute.');
+      continue;                                   // this model is gone: try the next one
+    }
+    if (!response.ok) throw new HttpError(502, `The AI endpoint replied ${response.status}. Try again later.`);
+    try {
+      return String((await response.json()).choices?.[0]?.message?.content || '').trim();
+    } catch (e) {
+      lastProblem = new HttpError(502, 'The AI endpoint sent something unreadable. Try again.');
+    }
   }
-  if (response.status === 429) throw new HttpError(429, 'The free AI endpoint is busy right now. Try again in a minute.');
-  if (!response.ok) throw new HttpError(502, `The AI endpoint replied ${response.status}. Try again later.`);
-  let text = '';
-  try {
-    text = (await response.json()).choices?.[0]?.message?.content || '';
-  } catch (e) {
-    throw new HttpError(502, 'The AI endpoint sent something unreadable. Try again.');
-  }
-  return String(text).trim();
+  throw lastProblem || new HttpError(502, 'The AI endpoint is unavailable right now. Try again in a minute.');
 }
 
 /* Index just past the "}" that matches the "{" at start, ignoring braces inside strings. */

@@ -48,6 +48,16 @@ Authorization: Bearer <Firebase ID token>
    ```
    Leave it empty to keep using the Firebase callable.
 
+## Vars and secrets
+
+| Name | Kind | Default | What it does |
+| --- | --- | --- | --- |
+| `HF_TOKEN` | secret | — | Token from <https://huggingface.co/settings/tokens>. Required. |
+| `FIREBASE_API_KEY` | var | — | Your Firebase Web API key. Public, and used only to verify the caller's ID token. |
+| `HF_MODEL` | var | `Qwen/Qwen3-4B-Instruct-2507` | Any chat model the HF router serves on a free provider. If a provider withdraws it, the Worker falls back to the next model in its built-in list. |
+| `DAILY_LIMIT` | var | `40` | Messages per user per UTC day. |
+| `ALLOWED_ORIGINS` | var | GitHub Pages + `localhost:5500/5501` | Comma-separated CORS origins. |
+
 ## What it does
 
 - Verifies the caller's Firebase ID token, so only a signed-in user of your project gets answers.
