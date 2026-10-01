@@ -2106,7 +2106,7 @@ table.lsheet td {
 
 .team-cols {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 22vw, 360px);
   gap: 16px;
   align-items: start;
 }
@@ -2521,7 +2521,7 @@ table.lsheet td {
 /* Team chat: fixed right-hand panel (same idea as the Inspire Feed on Overview) */
 /* Team page: keep ALL content (buttons, empty state, tabs) clear of the fixed 360px chat panel */
 .page.page-wide:has(.wire) {
-  margin-right: 360px;
+  margin-right: clamp(300px, 22vw, 360px);
 }
 
 .team-cols {
@@ -2533,7 +2533,7 @@ table.lsheet td {
   top: var(--topbar-h, 66px);
   right: 0;
   bottom: 0;
-  width: 360px;
+  width: clamp(300px, 22vw, 360px);
   height: auto;
   min-height: 0;
   z-index: 40;
@@ -3430,7 +3430,7 @@ body.auth-lock {
 /* ===== Inspire Feed (right rail) ===== */
 .page-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 22vw, 360px);
   gap: 0;
   align-items: start;
 }

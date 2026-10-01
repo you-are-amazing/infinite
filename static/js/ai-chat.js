@@ -391,7 +391,7 @@
       '.aic-ball-side{position:relative;right:auto;bottom:auto;margin:auto;flex:none;width:64px;height:64px;font-size:28px}',
       '.aic-ball-side:hover{transform:translateY(-3px) scale(1.05)}',
       '.aic-ball-team{margin:10px auto 14px}',
-      'body:has(#inspire-rail) .aic-ball:not(.aic-ball-side){right:384px}',
+      'body:has(#inspire-rail) .aic-ball:not(.aic-ball-side){right:calc(clamp(300px, 22vw, 360px) + 24px)}',
       '@media (max-width:1100px){body:has(#inspire-rail) .aic-ball:not(.aic-ball-side){right:20px}}',
       '@media (max-width:860px){.aic-ball-side{width:44px;height:44px;font-size:20px}}',
 
