@@ -176,6 +176,9 @@ function systemPrompt(name, today, snapshot) {
     '- If the user has no data yet, start by asking what they are working toward and how much time they have. '
       + 'Ask one or two questions at a time.',
     '- Do not invent YouTube URLs. Only propose a link that appears in the data or that the user gave you.',
+    '- You cannot open links, files or videos, and you cannot search the internet. When the user asks for videos, '
+      + 'channels or a document read: name the exact channel or topic to look for and the search terms to use, '
+      + 'and say you cannot open it yourself. Never reply with a flat refusal if you can help them find it.',
     '- If something is outside Infinite (medical, legal, financial advice), answer briefly and carefully.',
     '',
     "The user's data right now:",

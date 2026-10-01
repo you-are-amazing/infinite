@@ -82,11 +82,7 @@
     body:not(.chatting) .ax-main{padding-bottom:9vh}
     body:not(.chatting) .ax-note{position:absolute;left:0;right:0;bottom:0;padding-bottom:14px}
     .ax-msg{max-width:86%;padding:12px 16px;border-radius:14px;font-size:15px;line-height:1.6;word-wrap:break-word}
-    .ax-msg p{margin:0 0 8px}.ax-msg p:last-child{margin:0}.ax-msg ul,.ax-msg ol{margin:4px 0 8px;padding-left:20px}
-    .ax-msg li{margin:3px 0}
-    .ax-msg b.ax-h{display:block;margin:2px 0 6px;color:var(--green);font-size:14.5px;letter-spacing:.01em}
-    .ax-msg i{color:var(--muted)}
-    .ax-msg code{background:var(--surface3);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px}
+    .ax-msg p{margin:0 0 8px}.ax-msg p:last-child{margin:0}.ax-msg ul{margin:4px 0 8px;padding-left:20px}
     .ax-msg.me{align-self:flex-end;background:var(--green-soft);border:1px solid rgba(61,220,151,.28)}
     .ax-msg.ai{align-self:flex-start;background:var(--surface);border:1px solid var(--line)}
     .ax-act{align-self:stretch;display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-left:3px solid var(--lav);border-radius:10px;background:var(--surface)}
@@ -125,6 +121,34 @@
       body.open-side::before{content:"";position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55)}
       .ax-menu{display:grid;place-items:center;flex:none;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text)}
       .ax-pillbox.m,.ax-top .auth-account-actions{display:none}.ax-top{padding:12px 16px;gap:10px}.ax-hero h1{font-size:28px}}
+
+    /* ===== chat v3: open AI replies with a liquid ∞ avatar, highlighted text ===== */
+    .ax-thread{gap:26px;max-width:880px}
+    .ax-row{display:flex;gap:16px;align-items:flex-start;width:100%}
+    .ax-av{flex:none;width:48px;height:30px;margin-top:5px;image-rendering:pixelated;filter:drop-shadow(0 0 7px rgba(61,220,151,.5))}
+    .ax-msg.ai{flex:1;min-width:0;max-width:none;padding:2px 0;background:none;border:0;font-size:15.5px;line-height:1.72;color:var(--text)}
+    .ax-msg.ai p{margin:0 0 10px}
+    .ax-msg.ai b{font-weight:650;color:#e9fff4;background:linear-gradient(transparent 58%,rgba(61,220,151,.30) 58%);padding:0 2px;border-radius:2px}
+    .ax-msg.ai b.ax-h{display:block;background:none;margin:4px 0 10px;padding:2px 0 2px 12px;border-left:3px solid var(--green);font-size:17.5px;line-height:1.35;color:var(--green);letter-spacing:-.01em;border-radius:0}
+    .ax-msg.ai ul{list-style:none;padding:0;margin:6px 0 12px}
+    .ax-msg.ai ul li{position:relative;padding:7px 12px 7px 34px;margin:6px 0;border-radius:10px;background:rgba(61,220,151,.06);border:1px solid rgba(61,220,151,.16)}
+    .ax-msg.ai ul li::before{content:"";position:absolute;left:13px;top:50%;width:8px;height:8px;margin-top:-4px;border-radius:2px;background:var(--green);box-shadow:0 0 8px rgba(61,220,151,.7);transform:rotate(45deg)}
+    .ax-msg.ai ol{list-style:none;counter-reset:n;padding:0;margin:6px 0 12px}
+    .ax-msg.ai ol li{counter-increment:n;position:relative;padding:7px 12px 7px 42px;margin:6px 0;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--line-soft)}
+    .ax-msg.ai ol li::before{content:counter(n);position:absolute;left:10px;top:50%;width:22px;height:22px;margin-top:-11px;border-radius:50%;background:var(--green);color:#06140d;font:700 12px/22px 'JetBrains Mono',monospace;text-align:center}
+    .ax-msg.ai code{color:#bef264;background:rgba(190,242,100,.10);border:1px solid rgba(190,242,100,.28)}
+    .ax-msg.me{border-radius:18px 18px 4px 18px;background:linear-gradient(135deg,rgba(61,220,151,.22),rgba(132,204,22,.12));border:1px solid rgba(61,220,151,.35);font-size:15.5px;max-width:78%}
+    .ax-act{margin-left:64px;align-self:stretch;width:auto}
+    .ax-cp{margin-top:6px;padding:4px 10px;border:1px solid var(--line);border-radius:8px;background:none;color:var(--muted);font-size:12px;opacity:0;transition:opacity .2s}
+    .ax-row:hover .ax-cp,.ax-cp:focus-visible{opacity:1}.ax-cp:hover{color:var(--green);border-color:var(--green)}
+    .ax-think{align-self:center;color:var(--muted);font-size:14px;background:linear-gradient(90deg,var(--muted) 30%,var(--green) 50%,var(--muted) 70%) 0 0/250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:axs 1.6s linear infinite}
+    @keyframes axs{to{background-position:-150% 0}}
+    @keyframes axu{from{opacity:0;transform:translateY(8px);filter:blur(3px)}to{opacity:1;transform:none;filter:none}}
+    .ax-msg.ai.ax-in>*{animation:axu .5s cubic-bezier(.22,.9,.3,1) both}
+    .ax-in>*:nth-child(2){animation-delay:.07s}.ax-in>*:nth-child(3){animation-delay:.14s}.ax-in>*:nth-child(4){animation-delay:.21s}
+    .ax-in>*:nth-child(5){animation-delay:.28s}.ax-in>*:nth-child(6){animation-delay:.35s}.ax-in>*:nth-child(n+7){animation-delay:.42s}
+    @media (prefers-reduced-motion:reduce){.ax-msg.ai.ax-in>*,.ax-think{animation:none}}
+    @media (max-width:700px){.ax-av{width:36px;height:22px}.ax-row{gap:10px}.ax-act{margin-left:46px}}
   </style>
 </head>
 <body class="ax">
@@ -247,7 +271,7 @@
      {uid: [...]} there. This page expects an ARRAY, so it now keeps its own key and only ever
      adopts the legacy value when it really is an array. */
   var $ = function (id) { return document.getElementById(id); };
-  var chats = [], cur = null, busy = false, callable = null;
+  var chats = [], cur = null, busy = false, callable = null, freshMsg = null;
 
   /* ---------- helpers ---------- */
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -342,7 +366,8 @@
       }
     }
     msgs.forEach(function (m, mi) {
-      h += '<div class="ax-msg ' + (m.role === 'user' ? 'me' : 'ai') + '">' + (m.role === 'user' ? '<p>' + esc(m.text).replace(/\n/g, '<br>') + '</p>' : fmt(m.text)) + '</div>';
+      if (m.role === 'user') h += '<div class="ax-msg me"><p>' + esc(m.text).replace(/\n/g, '<br>') + '</p></div>';
+      else h += '<div class="ax-row"><canvas class="ax-av" width="64" height="40" aria-hidden="true"></canvas><div><div class="ax-msg ai' + (m === freshMsg ? ' ax-in' : '') + '">' + fmt(m.text) + '</div><button type="button" class="ax-cp" data-cp="' + mi + '"><i class="fa-regular fa-copy"></i> Copy</button></div></div>';
       (m.actions || []).forEach(function (a, ai) {
         var d = describe(a);
         h += '<div class="ax-act" data-s="' + esc(a.status) + '"><i class="fa-solid ' + d[0] + '"></i><div class="tx"><small>' + esc(d[1]) + '</small>' + esc(d[2]) + '</div>' +
@@ -350,7 +375,7 @@
             : '<span class="d">' + esc(a.status === 'added' ? 'Added' : a.status === 'skipped' ? 'Skipped' : a.status) + '</span>') + '</div>';
       });
     });
-    if (busy) h += '<div class="ax-msg ai ax-typing"><span></span><span></span><span></span></div>';
+    if (busy) h += '<div class="ax-row"><canvas class="ax-av think" width="64" height="40" aria-hidden="true"></canvas><span class="ax-think">Thinking…</span></div>';
     $('ax-thread').innerHTML = h;
     var sc = $('ax-scroll'); sc.scrollTop = sc.scrollHeight;
   }
@@ -387,8 +412,8 @@
   }
   /* Same request and response shape as the callable, so the Worker can be swapped in and out. */
   function myData() {
-    /* Trim before sending: the Worker only reads 300 characters of each note, and a lean
-       body keeps it well inside the free plan's CPU budget. */
+    /* Trim before sending: the Worker only reads 300 characters of each note, so whole bodies
+       waste upload and the free plan's CPU budget for no gain. */
     return {
       goals: rj('goals', []).slice(0, 60),
       notes: rj('life_notes', []).slice(0, 25).map(function (n) {
@@ -397,17 +422,27 @@
       links: rj('life_inspire_links', []).slice(0, 25),
     };
   }
-  async function endpointCall(payload) {
+  async function endpointCall(payload, attempt) {
+    attempt = attempt || 0;
     var u = user();
     if (!u || typeof u.getIdToken !== 'function') throw new Error('Please sign in again, then retry.');
     payload.data = myData();
-    var res = await fetch(AI_ENDPOINT.replace(/\/$/, '') + '/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await u.getIdToken() },
-      body: JSON.stringify(payload),
-    });
+    var res;
+    try {
+      res = await fetch(AI_ENDPOINT.replace(/\/$/, '') + '/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await u.getIdToken() },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      if (attempt < 1) return endpointCall(payload, attempt + 1);      // the network blinked, try once
+      var down = new Error('Could not reach Infinite AI. Check your connection and try again.');
+      down.code = 'unavailable';
+      throw down;
+    }
     var data = null;
     try { data = await res.json(); } catch (e) {}
+    if (res.status >= 500 && attempt < 1) return endpointCall(payload, attempt + 1);
     if (!res.ok) {
       var err = new Error((data && data.error) || 'Infinite AI is unavailable right now.');
       err.code = res.status === 401 ? 'unauthenticated' : res.status === 429 ? 'resource-exhausted'
@@ -444,9 +479,10 @@
     p.then(function (res) {
       var d = (res && res.data) || {};
       var acts = (d.proposed || []).map(function (a, i) { return { id: Date.now() + '-' + i, name: a.name, args: a.args, status: 'pending' }; });
-      chat.messages.push({ role: 'model', text: d.reply || '', actions: acts });
+      freshMsg = { role: 'model', text: d.reply || '', actions: acts };
+      chat.messages.push(freshMsg);
     }).catch(function (e) { console.warn('Infinite AI error', e); chat.messages.push({ role: 'model', text: friendly(e) }); })
-      .then(function () { busy = false; chat.ts = Date.now(); saveChats(); drawChats(); gate(); if (cur === chat) drawThread(); $('ax-input').focus(); });
+      .then(function () { busy = false; chat.ts = Date.now(); saveChats(); drawChats(); gate(); if (cur === chat) drawThread(); freshMsg = null; $('ax-input').focus(); });
   }
   function autosize() { var i = $('ax-input'); i.style.height = 'auto'; i.style.height = Math.min(i.scrollHeight, 160) + 'px'; }
 
@@ -507,6 +543,8 @@
       cur = chats.filter(function (c) { return c.id === b.dataset.id; })[0] || null; drawChats(); drawThread();
     });
     $('ax-thread').addEventListener('click', function (e) {
+      var cp = e.target.closest('.ax-cp');
+      if (cp) { var cm = cur && cur.messages[+cp.dataset.cp]; if (cm && navigator.clipboard) navigator.clipboard.writeText(cm.text).then(function () { toast('Copied'); }); return; }
       var b = e.target.closest('.add,.skip'); if (!b) return;
       var a = cur && cur.messages[+b.dataset.m] && cur.messages[+b.dataset.m].actions[+b.dataset.a];
       if (!a || a.status !== 'pending') return;
@@ -594,6 +632,51 @@
     if (idle) { if (reduce) goal = phase; else { auto = (auto + dt/2.4) % 1; goal = auto; } }
     phase = (phase + (((goal - phase + .5) % 1 + 1) % 1 - .5)*Math.min(1, dt*9) + 1) % 1;
     draw(phase);
+  })(prev);
+})();
+</script>
+<script>
+/* Liquid pixel ∞ avatars: every canvas.ax-av in the chat is painted from one shared pixel map. */
+(() => {
+  const N = 32, H = 20, OY = 6, A = [16,185,129], B = [132,204,22], L1 = [190,242,100], L2 = [236,255,214];
+  const S = []; let len = 0;
+  for (let i = 0; i <= 720; i++) {
+    const t = 2*Math.PI*i/720, k = 1 + Math.sin(t)**2, x = 16 + 13.2*Math.cos(t)/k, y = 16 + 21.1*Math.sin(t)*Math.cos(t)/k;
+    if (i) len += Math.hypot(x - S[i-1][0], y - S[i-1][1]); S.push([x, y, len]);
+  }
+  S.forEach(s => s[2] /= len); S.pop();
+  const PIX = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < N; x++) {
+    let b = 1e9, u = 0;
+    for (const s of S) { const d = (s[0]-x-.5)**2 + (s[1]-y-OY-.5)**2; if (d < b) { b = d; u = s[2]; } }
+    b = Math.sqrt(b); if (b <= 1.5) PIX.push({ x, y, u, i: (y*N + x)*4, edge: b > .95 });
+  }
+  const off = document.createElement('canvas'); off.width = N; off.height = H;
+  const o = off.getContext('2d'), img = o.createImageData(N, H);
+  const mix = (a, b, t) => a.map((v, k) => v + (b[k]-v)*t);
+  function paint(ph) {
+    const d = img.data; d.fill(0);
+    for (const p of PIX) {
+      const dd = Math.abs(((p.u - ph + .5) % 1 + 1) % 1 - .5);
+      let c = mix(A, B, .5 - .5*Math.cos(2*Math.PI*p.u));
+      const w = .86 + .14*Math.sin(ph*25.1 + p.x*.7 + p.y*1.1);          /* liquid shimmer */
+      c = dd < .04 ? L2 : dd < .09 ? L1 : c.map(v => v*w*(p.edge ? .6 : 1));
+      d[p.i] = c[0]; d[p.i+1] = c[1]; d[p.i+2] = c[2]; d[p.i+3] = 255;
+    }
+    o.putImageData(img, 0, 0);
+  }
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let ph = 0, prev = performance.now();
+  (function frame(now) {
+    requestAnimationFrame(frame);
+    const dt = Math.min(.05, (now - prev)/1000); prev = now;
+    const cvs = document.querySelectorAll('canvas.ax-av'); if (!cvs.length) return;
+    if (!reduce) ph = (ph + dt/3) % 1;
+    for (const think of [false, true]) {
+      const set = [...cvs].filter(c => c.classList.contains('think') === think); if (!set.length) continue;
+      paint(think ? (ph*4) % 1 : ph);
+      for (const c of set) { const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.clearRect(0, 0, c.width, c.height); g.drawImage(off, 0, 0, N, H, 0, 0, c.width, c.height); }
+    }
   })(prev);
 })();
 </script>
