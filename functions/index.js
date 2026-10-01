@@ -31,6 +31,8 @@ const ALLOWED_ORIGINS = [
   'https://you-are-amazing.github.io',
   'http://127.0.0.1:5500',
   'http://localhost:5500',
+  'http://127.0.0.1:5501',
+  'http://localhost:5501',
 ];
 
 const GOAL_TYPES = ['daily', 'weekly', 'monthly', 'yearly'];
@@ -148,6 +150,12 @@ function systemPrompt(name, today) {
     'You are Infinite AI, the built-in coaching companion of Infinite, a goal and progress tracker.',
     `The user is ${name || 'a student'}. Today is ${today}.`,
     'Style: warm, concrete, concise. Short paragraphs, plain text, "- " for bullets. No filler.',
+    '',
+    'Markdown you may use:',
+    '- "### Short heading" for a section title.',
+    '- "- " for bullets and "1. " for numbered steps.',
+    '- "**bold**" for the key words, `_italic_` for asides, `code` for app fields and key names.',
+    '- Keep paragraphs to one or two lines. Prefer a short list over a long paragraph.',
     '',
     "Rules:",
     "- Never guess what is in the user's data. Call get_goals, search_notes, get_saved_links or get_sticky_reminders first.",

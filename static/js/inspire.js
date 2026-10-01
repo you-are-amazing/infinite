@@ -33,7 +33,7 @@
     layout.appendChild(page);
     rail = document.createElement('aside');
     rail.id = 'inspire-rail'; rail.className = 'inspire-rail';
-    rail.innerHTML = `<div class="ins-head"><div class="ins-title"><span class="ico"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+    rail.innerHTML = `<div class="ins-head"><div class="ins-title"><span class="ico"><i class="fa-solid fa-lightbulb"></i></span>
         <h3>Inspire Feed<small>Your motivation, one click away</small></h3></div></div>
       <div class="ins-tabs">
         <button class="ins-tab on" type="button">MY LINKS (YOUTUBE ONLY)</button>

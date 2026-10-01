@@ -6,7 +6,7 @@
   <title>Team Goals - Infinite</title>
   <meta name="description" content="Create or join a team, share goals, chat and cheer each other on.">
   <link rel="icon" href="../deserve.png" type="image/png">
-  <link rel="stylesheet" href="../static/css/style.css?v=32">
+  <link rel="stylesheet" href="../static/css/style.css?v=33">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -14,10 +14,12 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js" defer></script>
   <script src="../static/js/auth.js?v=8" defer></script>
   <script src="../static/js/doc-attrib.js?v=2" defer></script>
   <script src="../static/js/team.js?v=12" defer></script>
   <script src="../static/js/team-notify.js?v=3" defer></script>
+  <script src="../static/js/ai-chat.js?v=7" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -257,7 +259,7 @@
       </form>
       <div class="auth-guest-confirm" id="auth-guest-confirm" hidden>
         <div class="auth-guest-icon"><i class="fa-solid fa-hard-drive"></i></div>
-        <p class="auth-guest-message">As a guest, your goals, notes, and calendar are saved only in <strong>this browser, on this device</strong>. Come back here anytime and it'll all be waiting for you — but clearing your browser data or switching devices means it won't come with you.</p>
+        <p class="auth-guest-message">As a guest, your goals, notes, and calendar are saved only in this browser on this device. AI chat and Team features require an account. Sign in or create an account to use them.</p>
         <div class="auth-guest-name-field">
           <label for="auth-guest-name">Name (optional)</label>
           <input id="auth-guest-name" type="text" autocomplete="name" placeholder="What should we call you?">

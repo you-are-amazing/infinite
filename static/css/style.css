@@ -209,7 +209,7 @@ h3 {
   height: 7px;
   border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 8px var(--green);
+  box-shadow: none;
 }
 
 .user-chip {
@@ -373,7 +373,7 @@ h3 {
   height: 6px;
   border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 7px var(--green);
+  box-shadow: none;
 }
 
 .page-title {
@@ -551,8 +551,11 @@ h3 {
 
 .today-flag {
   position: absolute;
-  top: -6px;
+  top: auto;
+  bottom: calc(100% + 3px);
   transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 2;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: .06em;
@@ -564,7 +567,7 @@ h3 {
   content: '';
   display: block;
   width: 2px;
-  height: 10px;
+  height: 7px;
   background: var(--amber);
   margin: 2px auto 0;
 }
@@ -575,7 +578,7 @@ h3 {
   border-radius: 50%;
   background: var(--amber);
   margin: 0 auto 1px;
-  box-shadow: 0 0 7px var(--amber);
+  display: none;
 }
 
 .yt-ticks {
@@ -2294,7 +2297,7 @@ table.lsheet td {
   height: 7px;
   border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 7px var(--green);
+  box-shadow: none;
 }
 
 .wire-title {
@@ -2826,6 +2829,8 @@ table.lsheet td {
 .auth-guest-message {
   color: var(--muted);
   font-size: .88rem;
+  text-align: justify;
+  text-align-last: left;
 }
 
 .auth-guest-message strong {
@@ -3338,7 +3343,7 @@ body.auth-lock {
 .ins-head {
   padding: 18px 16px 14px;
   border-bottom: 1px solid var(--line-soft);
-  background: radial-gradient(120% 140% at 0% 0%, var(--green-soft), transparent 60%);
+  background: transparent;
 }
 
 .ins-title {
@@ -3348,13 +3353,12 @@ body.auth-lock {
 }
 
 .ins-title .ico {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+  width: 17px;
   display: grid;
   place-items: center;
-  background: var(--green-soft);
-  color: var(--green);
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .ins-title h3 {
