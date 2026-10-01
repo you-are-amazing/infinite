@@ -224,9 +224,10 @@
 (function () {
   'use strict';
   var REGION = 'asia-south1';                         // keep identical to functions/index.js
-  /* Free backend: the URL of the private Hugging Face Space in ../ai-space (leave '' to use
-     the Firebase callable instead). The user only ever sends their Firebase ID token to it. */
-  var SPACE_URL = '';
+  /* Free backend: the Cloudflare Worker URL (see ../ai-worker/README.md). Leave '' to use the
+     Firebase callable instead. Either way the user sends their Firebase ID token and their own
+     goals and notes, and gets back {reply, proposed}. */
+  var AI_ENDPOINT = '';
   var KEY = 'infinite_ai_chats_v2', MAX_SEND = 20;
   var $ = function (id) { return document.getElementById(id); };
   var chats = [], cur = null, busy = false, callable = null;
@@ -345,11 +346,19 @@
     if (!window.firebase || !firebase.functions) throw new Error('Firebase Functions is not loaded.');
     return (callable = firebase.app().functions(REGION).httpsCallable('chat', { timeout: 90000 }));
   }
-  /* Same request and response shape as the callable, so the Space can be swapped in and out. */
-  async function spaceCall(payload) {
+  /* Same request and response shape as the callable, so the Worker can be swapped in and out. */
+  function myData() {
+    return {
+      goals: rj('goals', []),
+      notes: rj('life_notes', []),
+      links: rj('life_inspire_links', []),
+    };
+  }
+  async function endpointCall(payload) {
     var u = user();
     if (!u || typeof u.getIdToken !== 'function') throw new Error('Please sign in again, then retry.');
-    var res = await fetch(SPACE_URL.replace(/\/$/, '') + '/chat', {
+    payload.data = myData();
+    var res = await fetch(AI_ENDPOINT.replace(/\/$/, '') + '/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await u.getIdToken() },
       body: JSON.stringify(payload),
@@ -365,15 +374,15 @@
     return { data: data || {} };
   }
   function ask(payload) {
-    if (!SPACE_URL) return fn()(payload);
-    return spaceCall(payload);
+    if (!AI_ENDPOINT) return fn()(payload);
+    return endpointCall(payload);
   }
   function friendly(e) {
     var c = (e && e.code) || '';
     if (c.indexOf('unauthenticated') >= 0) return 'Please sign in again, then retry.';
     if (c.indexOf('resource-exhausted') >= 0) return e.message || 'Limit reached. Try again later.';
-    if (c.indexOf('not-found') >= 0 || c.indexOf('unavailable') >= 0) return SPACE_URL
-      ? 'The free backend is waking up. Send that again in a moment.'
+    if (c.indexOf('not-found') >= 0 || c.indexOf('unavailable') >= 0) return AI_ENDPOINT
+      ? 'Infinite AI is temporarily unavailable. Try again in a moment.'
       : 'Infinite AI is not deployed yet or is unreachable.';
     return (e && e.message) || 'Something went wrong. Please try again.';
   }

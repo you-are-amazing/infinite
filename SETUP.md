@@ -8,9 +8,12 @@ either way.
 | Backend | Cost | Use it when |
 | --- | --- | --- |
 | `functions/index.js` (Cloud Function + Gemini) | Needs the **Blaze** plan; Blaze's free quota covers small projects | You are happy to add a billing card |
-| `ai-space/app.py` (private Hugging Face Space) | Free, no card, but slower and rate-limited | You want to stay on the Firebase free plan |
+| `ai-worker/` (Cloudflare Worker + Hugging Face inference) | Free, no card | You want to stay on the Firebase free plan |
 
-Skip to "Free backend (Hugging Face Space)" if you are not upgrading to Blaze.
+Skip to "Free backend (Cloudflare Worker)" if you are not upgrading to Blaze.
+
+A option was tried and dropped: hosting on a Hugging Face Space is free no longer, since
+Docker Spaces on the free CPU tier now require a PRO subscription.
 
 Files (copy into your repo, same paths):
 
@@ -22,6 +25,7 @@ Files (copy into your repo, same paths):
 | `functions/package.json` | NEW |
 | `static/js/ai-chat.js` | NEW |
 | `ai/index.html` | NEW (the full Infinite AI workspace) |
+| `ai-worker/` | NEW (the free backend, if you are not upgrading to Blaze) |
 | `index.html` | UPDATED (2 new `<script>` lines) |
 
 ## 1. One-time Firebase setup
@@ -70,24 +74,30 @@ If you change `REGION`, change it in `static/js/ai-chat.js` too.
 - **Button missing**: you are in guest mode (the AI is signed-in only on purpose).
 - Server errors: `firebase functions:log`
 
-## Free backend (Hugging Face Space)
+## Free backend (Cloudflare Worker)
 
 This keeps the project on the Firebase free plan, so no billing card is needed. Full detail
-lives in `ai-space/README.md`; the short version:
+lives in `ai-worker/README.md`; the short version:
 
-1. Create a **private** Space at <https://huggingface.co/new-space>, SDK **Docker**, and upload
-   `ai-space/app.py`, `ai-space/requirements.txt` and `ai-space/Dockerfile`.
-2. Create a read token at <https://huggingface.co/settings/tokens>.
-3. Create a Firebase service-account key (Project settings → Service accounts → *Generate new
-   private key*).
-4. In the Space, add two **Secrets** (not variables): `HF_TOKEN` and `FIREBASE_SERVICE_ACCOUNT`
-   (the whole JSON on one line), then restart the Space.
-5. Check <https://you-space.hf.space/health> returns `"has_token": true` and `"has_firebase": true`.
+1. Create a free Cloudflare account at <https://dash.cloudflare.com/sign-up>, then:
+   ```bash
+   npm install -g wrangler && wrangler login
+   ```
+2. Put your **Firebase Web API key** in `ai-worker/wrangler.toml` next to `FIREBASE_API_KEY`
+   (Project settings → Your apps → Web API key). It is public in your site's JS anyway; the
+   Worker needs it to verify the signed-in user.
+3. Add the model provider token as a Worker secret:
+   ```bash
+   cd ai-worker && npx wrangler secret put HF_TOKEN
+   ```
+4. `cd ai-worker && npx wrangler deploy`
+5. Check `https://infinite-ai.<you>.workers.dev/health` returns `"hasToken": true` and
+   `"hasFirebaseKey": true`.
 6. Set the URL in `ai/index.html`:
    ```js
-   var SPACE_URL = 'https://<you>-<space>.hf.space';
+   var AI_ENDPOINT = 'https://infinite-ai.<you>.workers.dev';
    ```
 
-Leave `SPACE_URL` empty to keep using the Cloud Function. The Space verifies the user's
-Firebase ID token, so it only ever answers for a signed-in user, and it never writes to
-Firestore: the browser applies approved changes to localStorage as before.
+Leave `AI_ENDPOINT` empty to keep using the Cloud Function. Either way the user only sends their
+Firebase ID token plus their own goals and notes, and nothing is written back to Firestore: the
+browser applies approved changes to localStorage as before.
