@@ -31,6 +31,9 @@
   let teamsUnsub = null;
   let teamDocUnsub = null;
   let goalsUnsub = null;
+  let lastGoalDocs = [];            // last goals snapshot, so blocks can re-render when members change
+  const openGoalBlocks = new Set(); // which person/team blocks are expanded (survives live re-renders)
+  let editingGoalId = null;         // goal currently being edited inline (live re-renders wait until it's saved/cancelled)
   let messagesUnsub = null;
   let rewardsUnsub = null;
   let docsUnsub = null;
@@ -76,6 +79,60 @@
 
   function initials(name) {
     return (name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  }
+
+  // ---- profile pictures (stored per member in the team doc: members[uid].photo) ----
+  // Members can write to the team doc, so never trust the string: only accept a plain base64 image.
+  const PHOTO_RE = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/;
+
+  function hashStr(str) {                       // tiny content hash, just to notice when a picture changed
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36) + ':' + str.length;
+  }
+
+  function memberPhoto(uid) {
+    const m = currentTeamData && currentTeamData.members && currentTeamData.members[uid];
+    const p = m && m.photo;
+    return (typeof p === 'string' && p.length < 60000 && PHOTO_RE.test(p)) ? p : '';
+  }
+
+  // Picture if they set one, otherwise their initials (the default look).
+  function paintMemberAvatar(el, uid, name) {
+    if (!el) return;
+    const photo = memberPhoto(uid);
+    const key = photo ? uid + ':' + hashStr(photo) : '';
+    if (el.dataset.pfKey === key && el.dataset.pfName === (name || '')) return;   // nothing changed
+    el.dataset.pfKey = key;
+    el.dataset.pfName = name || '';
+    el.textContent = initials(name);
+    if (photo) {
+      el.style.backgroundImage = 'url("' + photo + '")';
+      el.style.backgroundSize = 'cover';
+      el.style.backgroundPosition = 'center';
+      el.style.color = 'transparent';
+    } else {
+      el.style.backgroundImage = '';
+      el.style.backgroundSize = '';
+      el.style.backgroundPosition = '';
+      el.style.color = '';
+    }
+  }
+
+  // Make sure my own picture is in the team doc so teammates can see it (only ever adds/updates, never deletes).
+  let photoHealKey = '';
+  function ensureMyTeamPhoto() {
+    if (!currentUser || !currentTeamId || !currentTeamData || !window.infiniteProfile) return;
+    if (!window.infiniteProfile.isReady()) return;
+    const mine = window.infiniteProfile.getPhoto();
+    const me = currentTeamData.members && currentTeamData.members[currentUser.uid];
+    if (!mine || !me || me.photo === mine) return;
+    const key = currentTeamId + ':' + hashStr(mine);
+    if (photoHealKey === key) return;                   // already tried this one
+    photoHealKey = key;
+    window.lifeIsShortDb.collection('teams').doc(currentTeamId)
+      .update({ ['members.' + currentUser.uid + '.photo']: mine })
+      .catch((e) => { console.warn('Could not share your profile picture with the team', e); });
   }
 
   function formatTime(ts) {
@@ -312,6 +369,9 @@
     teardownTeamListeners();
     currentTeamId = teamId;
     window.infiniteActiveTeamId = teamId;
+    lastGoalDocs = [];
+    openGoalBlocks.clear();
+    editingGoalId = null;
     resetChatState();
     $('no-team-state').hidden = true;
     $('team-content').hidden = false;
@@ -333,6 +393,8 @@
       }
       renderTeamHeader();
       renderMembers();
+      ensureMyTeamPhoto();
+      if (lastGoalDocs.length) renderGoals(lastGoalDocs);
       refreshChat();
       Array.from(document.querySelectorAll('.team-item')).forEach((el) => el.classList.remove('active'));
     });
@@ -408,11 +470,12 @@
     const members = currentTeamData.members || {};
     const avatarsEl = $('member-avatars');
     avatarsEl.innerHTML = '';
+    ensureGoalStyles();
     Object.keys(members).forEach((uid) => {
       const el = document.createElement('div');
       el.className = 'avatar';
       el.title = members[uid].name || 'Member';
-      el.textContent = initials(members[uid].name);
+      paintMemberAvatar(el, uid, members[uid].name);
       avatarsEl.appendChild(el);
     });
 
@@ -422,7 +485,8 @@
       const row = document.createElement('div');
       row.className = 'member-row';
       const isOwner = uid === currentTeamData.ownerId;
-      row.innerHTML = `<span>${escapeHtml(members[uid].name || 'Member')}</span>${isOwner ? '<span class="owner-tag">OWNER</span>' : ''}`;
+      row.innerHTML = `<span class="member-id"><span class="pf-avatar"></span><span>${escapeHtml(members[uid].name || 'Member')}</span></span>${isOwner ? '<span class="owner-tag">OWNER</span>' : ''}`;
+      paintMemberAvatar(row.querySelector('.pf-avatar'), uid, members[uid].name);
       listEl.appendChild(row);
     });
     const mc = $('members-count');
@@ -437,76 +501,401 @@
     return { daily: 'Daily', weekly: 'Weekly', yearly: 'Yearly' }[cadence] || cadence;
   }
 
-  function renderGoals(docs) {
-    const list = $('goals-list');
-    if (!docs.length) {
-      list.innerHTML = '<div class="empty-hint">No goals yet. Add one above.</div>';
+  // ----- per-person goal blocks -----
+  // Every member gets a block (plus one block for team goals). Click a block to open it
+  // and see that person's goals. When someone adds a goal you haven't opened yet, their
+  // block lights up with a notification line until you click it.
+
+  function ensureGoalStyles() {
+    if (document.getElementById('gblock-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'gblock-styles';
+    st.textContent = `
+      .gblock { border: 1px solid var(--line-soft); background: var(--surface2); border-radius: 12px; margin-bottom: 10px; overflow: hidden; transition: border-color .15s, box-shadow .15s; }
+      .gblock:hover { border-color: var(--line); }
+      .gblock.open { border-color: var(--line); }
+      .gblock.has-new { border-color: var(--green); box-shadow: 0 0 0 1px var(--green-soft), 0 0 18px var(--green-soft); }
+      .gblock-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 15px; background: transparent; border: 0; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
+      .gblock-avatar { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--lav), #5b5bd6); }
+      .gblock.is-team .gblock-avatar { background: linear-gradient(135deg, var(--amber), #d9822b); color: #3a2200; font-size: 14px; }
+      .gblock-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+      .gblock-name { font-weight: 700; font-size: 13.5px; display: flex; align-items: center; gap: 7px; }
+      .gblock-you { font-size: 9px; font-weight: 800; letter-spacing: .06em; padding: 2px 6px; border-radius: 6px; background: var(--lav-soft); color: var(--lav); }
+      .gblock-sub { font-size: 11px; color: var(--faint); }
+      .gblock-new { display: none; align-items: center; gap: 5px; font-size: 10px; font-weight: 800; letter-spacing: .05em; padding: 3px 9px; border-radius: 999px; background: var(--green); color: #06281b; white-space: nowrap; }
+      .gblock.has-new .gblock-new { display: inline-flex; animation: gblockPulse 1.6s ease-in-out infinite; }
+      @keyframes gblockPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+      .gblock-chev { color: var(--faint); font-size: 12px; transition: transform .2s; }
+      .gblock.open .gblock-chev { transform: rotate(180deg); }
+      .gblock-note { display: none; margin: 0 15px 12px; padding: 8px 11px; border-radius: 9px; background: var(--green-soft); color: var(--text); font-size: 12px; cursor: pointer; }
+      .gblock-note i { color: var(--green); margin-right: 6px; }
+      .gblock-note b { font-weight: 700; }
+      .gblock.has-new:not(.open) .gblock-note { display: block; }
+      .gblock-body { display: none; padding: 2px 15px 6px; border-top: 1px solid var(--line-soft); }
+      .gblock.open .gblock-body { display: block; padding-top: 12px; }
+      .gblock-body .goal-card { background: var(--surface); }
+      .gblock-empty { padding: 4px 0 10px; font-size: 12px; color: var(--faint); }
+      .pf-avatar { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--lav), #5b5bd6); overflow: hidden; }
+      .member-row .member-id { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+      .chat-msg:not(.mine) { margin-left: 34px; max-width: calc(85% - 34px); }
+      .chat-msg.has-preview:not(.mine) { width: min(280px, calc(85% - 34px)); }
+      .chat-msg .msg-avatar { position: absolute; left: -34px; top: 0; width: 26px; height: 26px; flex-basis: 26px; font-size: 9px; }
+      .member-avatars .avatar { background-position: center; }
+      .goal-tools { margin-left: auto; display: inline-flex; gap: 6px; }
+      .goal-tool { width: 28px; height: 26px; display: inline-grid; place-items: center; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 8px; cursor: pointer; font-size: 11px; }
+      .goal-tool:hover { color: var(--text); border-color: var(--lav); }
+      .goal-tool.danger:hover { color: var(--red); border-color: var(--red); }
+      .goal-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+      .goal-edit input { flex: 1 1 220px; min-width: 0; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--lav); background: var(--surface2); color: var(--text); font: inherit; font-size: 13px; outline: none; }
+      .goal-edit select { padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface2); color: var(--text); font: inherit; font-size: 12px; }
+      .goal-edit .btn { padding: 8px 13px; }
+      .goal-new-tag { display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: .06em; background: var(--green); color: #06281b; vertical-align: middle; }
+    `;
+    document.head.appendChild(st);
+  }
+
+  function goalCreatedMs(goal) {
+    return goal.createdAt && goal.createdAt.toMillis ? goal.createdAt.toMillis() : 0;
+  }
+
+  // Per-user, per-team "last opened" times, kept in this browser.
+  function goalSeenKey() {
+    return 'team_goal_seen_v1:' + (currentUser ? currentUser.uid : '') + ':' + currentTeamId;
+  }
+
+  function loadGoalSeen() {
+    let seen = null;
+    try { seen = JSON.parse(localStorage.getItem(goalSeenKey())); } catch (e) { seen = null; }
+    if (!seen || typeof seen !== 'object') seen = {};
+    if (!seen.blocks) seen.blocks = {};
+    if (!seen.baseline) {                 // first visit: whatever already exists is not "new"
+      seen.baseline = Date.now();
+      saveGoalSeen(seen);
+    }
+    return seen;
+  }
+
+  function saveGoalSeen(seen) {
+    try { localStorage.setItem(goalSeenKey(), JSON.stringify(seen)); } catch (e) { /* storage unavailable */ }
+  }
+
+  function markGoalBlockSeen(seen, key, goalList) {
+    let newest = Date.now();
+    goalList.forEach((d) => { newest = Math.max(newest, goalCreatedMs(d.data())); });
+    seen.blocks[key] = newest;
+    saveGoalSeen(seen);
+  }
+
+  // ----- edit / delete -----
+
+  // Personal goal: its owner. Team goal: whoever created it. The team owner can manage any goal.
+  function canManageGoal(goal) {
+    if (!currentUser) return false;
+    if (currentTeamData && currentTeamData.ownerId === currentUser.uid) return true;
+    if (goal.type === 'team') return goal.createdBy === currentUser.uid;
+    return goal.ownerId === currentUser.uid || (!goal.ownerId && goal.createdBy === currentUser.uid);
+  }
+
+  function goalToolsHtml() {
+    return `<span class="goal-tools">
+      <button type="button" class="goal-tool" data-act="edit" title="Edit goal" aria-label="Edit goal"><i class="fa-solid fa-pen"></i></button>
+      <button type="button" class="goal-tool danger" data-act="delete" title="Delete goal" aria-label="Delete goal"><i class="fa-regular fa-trash-can"></i></button>
+    </span>`;
+  }
+
+  function goalEditHtml(goal) {
+    const opt = (v, label) => `<option value="${v}" ${goal.cadence === v ? 'selected' : ''}>${label}</option>`;
+    return `<div class="goal-edit">
+      <input type="text" class="goal-edit-title" maxlength="140" value="${escapeHtml(goal.title)}" aria-label="Goal title">
+      <select class="goal-edit-cadence" aria-label="Cadence">${opt('daily', 'Daily')}${opt('weekly', 'Weekly')}${opt('yearly', 'Yearly')}</select>
+      <button type="button" class="btn btn-green goal-edit-save"><i class="fa-solid fa-check"></i>Save</button>
+      <button type="button" class="btn btn-quiet goal-edit-cancel">Cancel</button>
+    </div>`;
+  }
+
+  function startGoalEdit(doc, goal, card) {
+    if (editingGoalId && editingGoalId !== doc.id) {          // only one goal in edit mode at a time
+      editingGoalId = null;
+      renderGoals(lastGoalDocs);
       return;
     }
-    list.innerHTML = '';
-    docs.forEach((doc) => {
-      const goal = doc.data();
-      const card = document.createElement('div');
-      card.className = 'goal-card';
+    editingGoalId = doc.id;
+    const titleEl = card.querySelector('.goal-title');
+    const metaEl = card.querySelector('.goal-meta');
+    const holder = document.createElement('div');
+    holder.innerHTML = goalEditHtml(goal);
+    const form = holder.firstElementChild;
+    titleEl.replaceWith(form);
+    if (metaEl) metaEl.style.display = 'none';
+    const input = form.querySelector('.goal-edit-title');
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
 
-      if (goal.type === 'team') {
-        const participants = goal.participants || {};
-        const doneCount = Object.values(participants).filter((s) => s === 'done').length;
-        const total = Object.keys(participants).length;
-        const myStatus = participants[currentUser.uid] || 'pending';
-        card.innerHTML = `
-          <div class="goal-top">
-            <div>
-              <span class="badge badge-team">Team goal</span>
-              <div class="goal-title">${escapeHtml(goal.title)}</div>
-              <div class="goal-meta">${goalCadenceLabel(goal.cadence)} · ${doneCount}/${total} done</div>
-            </div>
-          </div>
-          <div class="participants-grid" data-goal-id="${doc.id}">
-            ${Object.keys(participants).map((uid) => {
-              const name = (currentTeamData.members && currentTeamData.members[uid] && currentTeamData.members[uid].name) || 'Member';
-              const done = participants[uid] === 'done';
-              const isSelf = uid === currentUser.uid;
-              return `<span class="participant-chip ${done ? 'done' : ''} ${isSelf ? 'self' : ''}" data-uid="${uid}" title="${done ? 'Done' : 'Pending'}"><span class="dot"></span>${escapeHtml(name)}</span>`;
-            }).join('')}
-          </div>`;
-        card.querySelector('.participants-grid').addEventListener('click', (e) => {
-          const chip = e.target.closest('.participant-chip.self');
-          if (!chip) return;
-          const newStatus = myStatus === 'done' ? 'pending' : 'done';
-          doc.ref.update({ [`participants.${currentUser.uid}`]: newStatus });
+    const finish = () => { editingGoalId = null; renderGoals(lastGoalDocs); };
+    const save = async () => {
+      const title = input.value.trim();
+      const cadence = form.querySelector('.goal-edit-cadence').value;
+      if (!title) { input.focus(); return; }
+      if (title === goal.title && cadence === goal.cadence) { finish(); return; }
+      const btn = form.querySelector('.goal-edit-save');
+      btn.disabled = true;
+      try {
+        await doc.ref.update({
+          title, cadence,
+          editedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          editedBy: currentUser.uid
         });
-      } else {
-        const isMine = goal.ownerId === currentUser.uid;
-        const reactions = goal.reactions || {};
-        const myReaction = reactions[currentUser.uid];
-        const reactCount = Object.keys(reactions).length;
-        card.innerHTML = `
-          <div class="goal-top">
-            <div>
-              <span class="badge badge-self">${escapeHtml(goal.ownerName || 'Someone')}'s goal</span>
-              <div class="goal-title">${escapeHtml(goal.title)}</div>
-              <div class="goal-meta">${goalCadenceLabel(goal.cadence)}</div>
-            </div>
-            ${isMine ? `<button class="done-toggle ${goal.status === 'done' ? 'done' : ''}" data-goal-id="${doc.id}">${goal.status === 'done' ? '✓ Done' : 'Mark done'}</button>` : `<span class="done-toggle ${goal.status === 'done' ? 'done' : ''}" style="pointer-events:none;">${goal.status === 'done' ? '✓ Done' : 'Pending'}</span>`}
-          </div>
-          <div class="reactions-row">
-            <button class="react-btn ${myReaction ? 'mine' : ''}" data-goal-id="${doc.id}">${REACT_EMOJI} ${reactCount || ''}</button>
-          </div>`;
-        if (isMine) {
-          card.querySelector('.done-toggle').addEventListener('click', () => {
-            doc.ref.update({ status: goal.status === 'done' ? 'pending' : 'done' });
-          });
-        }
-        card.querySelector('.react-btn').addEventListener('click', () => {
-          const field = `reactions.${currentUser.uid}`;
-          doc.ref.update({ [field]: myReaction ? firebase.firestore.FieldValue.delete() : REACT_EMOJI });
-        });
+        finish();
+      } catch (error) {
+        btn.disabled = false;
+        alert('Could not save the goal: ' + (error && error.message ? error.message : error));
       }
-      list.appendChild(card);
+    };
+    form.querySelector('.goal-edit-save').addEventListener('click', save);
+    form.querySelector('.goal-edit-cancel').addEventListener('click', finish);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(); }
     });
+  }
+
+  async function deleteGoal(doc, goal) {
+    if (!confirm('Delete this goal?\n\n"' + goal.title + '"\n\nThis removes it for everyone on the team.')) return;
+    try {
+      await doc.ref.delete();
+    } catch (error) {
+      const denied = error && error.code === 'permission-denied';
+      alert(denied
+        ? 'Firestore blocked the delete. Update your Firestore rules so members can delete goals (see README).'
+        : 'Could not delete the goal: ' + (error && error.message ? error.message : error));
+    }
+  }
+
+  function wireGoalTools(card, doc, goal) {
+    const edit = card.querySelector('[data-act="edit"]');
+    const del = card.querySelector('[data-act="delete"]');
+    if (edit) edit.addEventListener('click', () => startGoalEdit(doc, goal, card));
+    if (del) del.addEventListener('click', () => deleteGoal(doc, goal));
+  }
+
+  function buildTeamGoalCard(doc, goal, isNew) {
+    const card = document.createElement('div');
+    card.className = 'goal-card';
+    const members = (currentTeamData && currentTeamData.members) || {};
+    const participants = goal.participants || {};
+    const doneCount = Object.values(participants).filter((s) => s === 'done').length;
+    const total = Object.keys(participants).length;
+    const myStatus = participants[currentUser.uid] || 'pending';
+    const manage = canManageGoal(goal);
+    card.innerHTML = `
+      <div class="goal-top">
+        <div style="min-width:0;flex:1;">
+          <span class="badge badge-team">Team goal</span>${isNew ? '<span class="goal-new-tag">NEW</span>' : ''}
+          <div class="goal-title">${escapeHtml(goal.title)}</div>
+          <div class="goal-meta">${goalCadenceLabel(goal.cadence)} · ${doneCount}/${total} done${goal.editedAt ? ' · edited' : ''}</div>
+        </div>
+        <button type="button" class="done-toggle team-done-toggle ${myStatus === 'done' ? 'done' : ''}" data-goal-id="${doc.id}" title="Mark your part of this team goal as done">${myStatus === 'done' ? '✓ Done' : 'Mark done'}</button>
+      </div>
+      <div class="participants-grid" data-goal-id="${doc.id}">
+        ${Object.keys(participants).map((uid) => {
+          const name = (members[uid] && members[uid].name) || 'Member';
+          const done = participants[uid] === 'done';
+          const isSelf = uid === currentUser.uid;
+          return `<span class="participant-chip ${done ? 'done' : ''} ${isSelf ? 'self' : ''}" data-uid="${uid}" title="${done ? 'Done' : 'Pending'}"><span class="dotc"></span>${escapeHtml(name)}</span>`;
+        }).join('')}
+      </div>
+      ${manage ? `<div class="reactions-row">${goalToolsHtml()}</div>` : ''}`;
+    // Your own part of the team goal: the Mark done button (or your own chip) toggles it.
+    const toggleMine = () => {
+      const newStatus = myStatus === 'done' ? 'pending' : 'done';
+      doc.ref.update({ [`participants.${currentUser.uid}`]: newStatus })
+        .catch((error) => alert('Could not update the goal: ' + (error && error.message ? error.message : error)));
+    };
+    card.querySelector('.team-done-toggle').addEventListener('click', toggleMine);
+    card.querySelector('.participants-grid').addEventListener('click', (e) => {
+      if (e.target.closest('.participant-chip.self')) toggleMine();
+    });
+    if (manage) wireGoalTools(card, doc, goal);
+    return card;
+  }
+
+  function buildPersonalGoalCard(doc, goal, isNew) {
+    const card = document.createElement('div');
+    card.className = 'goal-card';
+    const isMine = goal.ownerId === currentUser.uid;
+    const reactions = goal.reactions || {};
+    const myReaction = reactions[currentUser.uid];
+    const reactCount = Object.keys(reactions).length;
+    const manage = canManageGoal(goal);
+    card.innerHTML = `
+      <div class="goal-top">
+        <div style="min-width:0;flex:1;">
+          <span class="badge badge-self">${escapeHtml(goal.ownerName || 'Someone')}'s goal</span>${isNew ? '<span class="goal-new-tag">NEW</span>' : ''}
+          <div class="goal-title">${escapeHtml(goal.title)}</div>
+          <div class="goal-meta">${goalCadenceLabel(goal.cadence)}${goal.editedAt ? ' · edited' : ''}</div>
+        </div>
+        ${isMine ? `<button class="done-toggle ${goal.status === 'done' ? 'done' : ''}" data-goal-id="${doc.id}">${goal.status === 'done' ? '✓ Done' : 'Mark done'}</button>` : `<span class="done-toggle ${goal.status === 'done' ? 'done' : ''}" style="pointer-events:none;">${goal.status === 'done' ? '✓ Done' : 'Pending'}</span>`}
+      </div>
+      <div class="reactions-row">
+        <button class="react-btn ${myReaction ? 'mine' : ''}" data-goal-id="${doc.id}">${REACT_EMOJI} ${reactCount || ''}</button>
+        ${manage ? goalToolsHtml() : ''}
+      </div>`;
+    if (isMine) {
+      card.querySelector('.done-toggle').addEventListener('click', () => {
+        doc.ref.update({ status: goal.status === 'done' ? 'pending' : 'done' });
+      });
+    }
+    card.querySelector('.react-btn').addEventListener('click', () => {
+      const field = `reactions.${currentUser.uid}`;
+      doc.ref.update({ [field]: myReaction ? firebase.firestore.FieldValue.delete() : REACT_EMOJI });
+    });
+    if (manage) wireGoalTools(card, doc, goal);
+    return card;
+  }
+
+  function renderGoals(docs) {
+    ensureGoalStyles();
+    lastGoalDocs = docs;
+    const list = $('goals-list');
+    // Someone is typing in an edit box: keep it as is, and apply the update once they save or cancel.
+    if (editingGoalId && list.querySelector('.goal-edit')) return;
+    editingGoalId = null;
     const goalsCount = $('goals-count');
     if (goalsCount) goalsCount.textContent = docs.length;
+    if (!currentUser || !currentTeamId) return;
+    if (!docs.length) {
+      list.innerHTML = '<div class="empty-hint">No goals yet. Add one above.</div>';
+      updateGoalsTabBadge(0);
+      return;
+    }
+
+    const members = (currentTeamData && currentTeamData.members) || {};
+    const seen = loadGoalSeen();
+
+    // Group the goals: team goals together, personal goals by owner.
+    const teamGoals = [];
+    const byOwner = {};
+    docs.forEach((d) => {
+      const g = d.data();
+      if (g.type === 'team') { teamGoals.push(d); return; }
+      const uid = g.ownerId || g.createdBy || 'unknown';
+      (byOwner[uid] = byOwner[uid] || []).push(d);
+    });
+
+    // People order: me first, then the rest of the members, then anyone who left but still has goals.
+    const uids = [];
+    if (members[currentUser.uid] || byOwner[currentUser.uid] || ((currentTeamData && currentTeamData.memberIds) || []).indexOf(currentUser.uid) !== -1) uids.push(currentUser.uid);
+    Object.keys(members).forEach((u) => { if (uids.indexOf(u) === -1) uids.push(u); });
+    Object.keys(byOwner).forEach((u) => { if (uids.indexOf(u) === -1) uids.push(u); });
+
+    const blocks = [];
+    if (teamGoals.length) {
+      blocks.push({ key: 'team', isTeam: true, name: 'Team goals', goals: teamGoals, mine: false });
+    }
+    uids.forEach((uid) => {
+      const goals = byOwner[uid] || [];
+      const fallbackName = goals.length ? (goals[0].data().ownerName || 'Member') : 'Member';
+      blocks.push({
+        key: 'u:' + uid, isTeam: false, uid,
+        name: (members[uid] && members[uid].name) || fallbackName,
+        goals, mine: uid === currentUser.uid
+      });
+    });
+
+    let totalNew = 0;
+    list.innerHTML = '';
+    blocks.forEach((b) => {
+      const lastSeen = Math.max(seen.baseline || 0, seen.blocks[b.key] || 0);
+      // New = added by someone else after you last opened this block.
+      const newDocs = b.goals.filter((d) => {
+        const g = d.data();
+        return g.createdBy !== currentUser.uid && goalCreatedMs(g) > lastSeen;
+      });
+      const isOpen = openGoalBlocks.has(b.key);
+      const doneCount = b.goals.filter((d) => {
+        const g = d.data();
+        if (g.type === 'team') return Object.values(g.participants || {}).length && Object.values(g.participants || {}).every((s) => s === 'done');
+        return g.status === 'done';
+      }).length;
+      const hasNew = newDocs.length > 0 && !isOpen;
+      if (hasNew) totalNew += newDocs.length;
+
+      const newest = newDocs.slice().sort((x, y) => goalCreatedMs(y.data()) - goalCreatedMs(x.data()))[0];
+      const sub = b.goals.length
+        ? b.goals.length + (b.goals.length === 1 ? ' goal' : ' goals') + ' · ' + doneCount + ' done'
+        : 'No goals yet';
+
+      const el = document.createElement('div');
+      el.className = 'gblock' + (b.isTeam ? ' is-team' : '') + (isOpen ? ' open' : '') + (hasNew ? ' has-new' : '');
+      el.dataset.block = b.key;
+      el.innerHTML = `
+        <button type="button" class="gblock-head" aria-expanded="${isOpen ? 'true' : 'false'}">
+          <span class="gblock-avatar">${b.isTeam ? '<i class="fa-solid fa-users"></i>' : escapeHtml(initials(b.name))}</span>
+          <span class="gblock-info">
+            <span class="gblock-name">${escapeHtml(b.isTeam ? 'Team goals' : b.name)}${b.mine ? '<span class="gblock-you">YOU</span>' : ''}</span>
+            <span class="gblock-sub">${sub}</span>
+          </span>
+          <span class="gblock-new"><i class="fa-solid fa-bell"></i><span class="gblock-new-n">${newDocs.length} NEW</span></span>
+          <span class="gblock-chev"><i class="fa-solid fa-chevron-down"></i></span>
+        </button>
+        <div class="gblock-note"><i class="fa-solid fa-bell"></i>${newest
+          ? (b.isTeam ? 'New team goal: ' : escapeHtml(b.name) + ' set a new goal: ') + '<b>' + escapeHtml(newest.data().title) + '</b>'
+          : ''}</div>
+        <div class="gblock-body"></div>`;
+
+      if (!b.isTeam) paintMemberAvatar(el.querySelector('.gblock-avatar'), b.uid, b.name);
+      const body = el.querySelector('.gblock-body');
+      if (!b.goals.length) {
+        body.innerHTML = '<div class="gblock-empty">' + (b.mine ? 'You haven\'t set a goal yet. Pick "My goal" above and add one.' : escapeHtml(b.name) + ' hasn\'t set a goal yet.') + '</div>';
+      } else {
+        b.goals.forEach((d) => {
+          const g = d.data();
+          const isNew = newDocs.indexOf(d) !== -1;
+          body.appendChild(g.type === 'team' ? buildTeamGoalCard(d, g, isNew) : buildPersonalGoalCard(d, g, isNew));
+        });
+      }
+
+      const toggle = () => {
+        const open = !el.classList.contains('open');
+        el.classList.toggle('open', open);
+        el.querySelector('.gblock-head').setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+          openGoalBlocks.add(b.key);
+          el.classList.remove('has-new');                 // opening = you've seen it
+          markGoalBlockSeen(loadGoalSeen(), b.key, b.goals);
+          refreshGoalsTabBadge();
+        } else {
+          openGoalBlocks.delete(b.key);
+        }
+      };
+      el.querySelector('.gblock-head').addEventListener('click', toggle);
+      el.querySelector('.gblock-note').addEventListener('click', toggle);
+
+      list.appendChild(el);
+
+      // A block that is already open shows its goals right now, so it counts as seen.
+      if (isOpen && newDocs.length) markGoalBlockSeen(seen, b.key, b.goals);
+    });
+
+    updateGoalsTabBadge(totalNew);
+  }
+
+  // Small green counter on the "Goals" tab while there are unopened new goals.
+  function updateGoalsTabBadge(n) {
+    const tab = document.querySelector('.team-tab[data-tab="goals"]');
+    if (!tab) return;
+    let badge = tab.querySelector('.new');
+    if (!n) { if (badge) badge.remove(); return; }
+    if (!badge) { badge = document.createElement('span'); badge.className = 'new'; tab.appendChild(badge); }
+    badge.textContent = n + ' NEW';
+  }
+
+  function refreshGoalsTabBadge() {
+    const n = document.querySelectorAll('#goals-list .gblock.has-new .gblock-new-n').length
+      ? Array.from(document.querySelectorAll('#goals-list .gblock.has-new .gblock-new-n'))
+          .reduce((sum, el) => sum + (parseInt(el.textContent, 10) || 0), 0)
+      : 0;
+    updateGoalsTabBadge(n);
   }
 
   async function addGoal() {
@@ -801,7 +1190,11 @@
     const node = mk('div', 'chat-msg' + (mine ? ' mine' : ''));
     node.dataset.id = doc.id;
 
-    if (!mine) node.appendChild(mk('div', 'sender', msg.senderName || 'Someone'));
+    if (!mine) {
+      ensureGoalStyles();
+      node.appendChild(mk('span', 'pf-avatar msg-avatar'));
+      node.appendChild(mk('div', 'sender', msg.senderName || 'Someone'));
+    }
     if (msg.replyTo && (msg.replyTo.text || msg.replyTo.id)) node.appendChild(buildQuote(msg.replyTo));
 
     const body = mk('div', 'msg-text');
@@ -857,6 +1250,10 @@
       return;
     }
     const mine = msg.senderId === currentUser.uid;
+    if (!mine) {
+      const memberName = (currentTeamData && currentTeamData.members && currentTeamData.members[msg.senderId] && currentTeamData.members[msg.senderId].name) || msg.senderName;
+      paintMemberAvatar(node.querySelector('.msg-avatar'), msg.senderId, memberName);
+    }
     node.querySelector('.time').textContent = formatTime(msg.createdAt);
     node.querySelector('.msg-del').hidden = !(mine || isOwner());
 
@@ -1655,6 +2052,8 @@
       btn.addEventListener('click', () => showTab(btn.dataset.tab));
     });
   }
+
+  document.addEventListener('lifeIsShortProfileReady', ensureMyTeamPhoto);
 
   function setupStaticButtons() {
     $('create-team-btn').addEventListener('click', () => currentUser ? createTeam() : promptSignIn());
