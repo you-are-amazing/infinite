@@ -570,7 +570,13 @@
     sendBtn = ws.querySelector('#aic-send');
     headMascot = ws.querySelector('.aic-m-head');
 
-    ball.addEventListener('click', function () { window.location.href = AI_DASHBOARD_URL; });
+    ball.addEventListener('click', function () {
+      if (!currentUser()) {
+        document.dispatchEvent(new CustomEvent('lifeIsShortRequireSignIn'));
+        return;
+      }
+      window.location.href = AI_DASHBOARD_URL;
+    });
     ws.querySelector('#aic-close').addEventListener('click', close);
     ws.querySelector('#aic-rail-toggle').addEventListener('click', function () { ws.classList.toggle('railed'); });
     ws.querySelector('#aic-new').addEventListener('click', function () {
@@ -626,7 +632,8 @@
   function syncVisibility() {
     if (!ball) return;
     var signedIn = !!currentUser();
-    ball.classList.toggle('show', signedIn);
+    var guestMode = localStorage.getItem('lifeIsShort_mode') === 'guest';
+    ball.classList.toggle('show', signedIn || guestMode);
     if (!signedIn) { close(); return; }
     if (loadedUid !== uid()) load();          // a different account: load that user's chats
     render();

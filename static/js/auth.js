@@ -126,6 +126,11 @@ function showPasswordReminder() {
 }
 
 function setAccountActions(user) {
+  const guestNotice = document.getElementById('guest-mode-notice');
+  if (guestNotice) {
+    guestNotice.hidden = Boolean(user) || localStorage.getItem(LIFE_IS_SHORT_MODE_KEY) !== 'guest';
+  }
+
   const actions = document.getElementById('auth-account-actions');
   if (!actions) return;
   actions.hidden = false;
@@ -354,6 +359,15 @@ function startGuestMode() {
 
 function setupAuthUi() {
   setupPasswordForm();
+  document.addEventListener('lifeIsShortRequireSignIn', () => {
+    if (!document.getElementById('auth-overlay')) return;
+    showAuthForm('signin');
+    setAuthOverlayVisible(true);
+  });
+  document.getElementById('guest-mode-signin')?.addEventListener('click', () => {
+    showAuthForm('signin');
+    setAuthOverlayVisible(true);
+  });
   document.querySelectorAll('[data-auth-choice]').forEach((button) => {
     button.addEventListener('click', () => {
       if (button.dataset.authChoice === 'guest') {

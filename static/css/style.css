@@ -390,6 +390,117 @@ h3 {
   letter-spacing: .05em;
 }
 
+@property --guest-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes guest-mode-border-shine {
+  to { --guest-border-angle: 1turn; }
+}
+
+.guest-mode-note {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -6px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(61, 220, 151, .28);
+  border-radius: 10px;
+  background: linear-gradient(100deg, var(--green-soft), var(--surface2) 72%);
+}
+
+.guest-mode-note::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(from var(--guest-border-angle), transparent 0deg 250deg, rgba(61, 220, 151, .35) 278deg, var(--green) 300deg, #bef264 312deg, rgba(61, 220, 151, .35) 328deg, transparent 346deg);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: guest-mode-border-shine 6s linear infinite;
+}
+
+.guest-mode-note>* {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guest-mode-note::before {
+    animation: none;
+  }
+}
+
+.guest-mode-note[hidden] {
+  display: none;
+}
+
+.guest-mode-note-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.guest-mode-note-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.guest-mode-note-copy strong {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.guest-mode-note-copy p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: justify;
+  text-align-last: left;
+}
+
+.guest-mode-note-action {
+  flex: none;
+  padding: 7px 12px;
+  border: 1px solid rgba(61, 220, 151, .35);
+  border-radius: 7px;
+  background: var(--green);
+  color: #06140d;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.guest-mode-note-action:hover {
+  filter: brightness(1.08);
+}
+
+@media (max-width: 600px) {
+  .guest-mode-note {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .guest-mode-note-action {
+    margin-left: 46px;
+  }
+}
+
 .head-actions {
   margin-left: auto;
   display: flex;
