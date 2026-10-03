@@ -261,6 +261,11 @@ The shared-doc lock follows exactly the same rule — see below.
   nothing here to keep, moderate or leak.
 - The sidebar's **Admin Inbox** item only appears for the owner, and clicking it opens the key popup instead of
   navigating, so the link is never a way around the key.
+- The site notification bell carries **both** sources in one panel: team chat messages and Connect messages, with
+  a red count on the bell, on the Team Goals item, and on the Admin Inbox item. A Connect message is "unread" while
+  its server flag says so, so opening the inbox on any device clears the badge everywhere. **Mark all read** writes
+  that flag, and a Connect item leads to the Developer box rather than to `/admin/`, which cannot help anyone who
+  cannot get through it.
 
 ## Infinite AI
 

@@ -1,7 +1,12 @@
-/* Team chat notifications — include this script on EVERY page of the site.
-   Shows a bell (with a red count) in the top bar, a badge next to "Team Goals"
-   in the sidebar, a small pop-up for new messages, and a slide-in panel that
-   lists unread messages from teammates.
+/* Site notifications — include this script on EVERY page of the site.
+   Shows a bell (with a red count) in the top bar, a badge next to "Team Goals" in the
+   sidebar, another next to "Admin Inbox", a small pop-up for new messages, and a slide-in
+   panel that lists everything unread.
+
+   Two sources feed the same panel:
+     - team chat messages, for any signed-in member;
+     - Connect page messages, for the developer account only. These are marked read in
+       Firestore (the same "read" flag the admin inbox uses), so they clear everywhere at once.
 
    Needs auth.js (Firebase Auth + Firestore) loaded on the same page.
    Works even if a page has no .top-actions bar (a floating bell is used instead).
@@ -15,16 +20,23 @@
   const SCRIPT_SRC = SCRIPT_EL && SCRIPT_EL.src;
   // team-notify.js lives in /static/js/, the team page in /team/
   const TEAM_URL = SCRIPT_SRC ? new URL('../../team/', SCRIPT_SRC).href : 'team/';
+  const CONTACT_URL = SCRIPT_SRC ? new URL('../../contact/', SCRIPT_SRC).href : 'contact/';
   const ON_TEAM_PAGE = /\/team(\/(index\.html)?)?$/.test(location.pathname);
+  const ON_CONTACT_PAGE = /\/contact(\/(index\.html)?)?$/.test(location.pathname);
   const BASE_TITLE = document.title;
+  // The account that owns the site. Only it may read every Connect message (see firestore.rules),
+  // so only it gets contact notifications.
+  const ADMIN_EMAIL = 'parmardarshan918@gmail.com';
 
   let user = null;
   let built = false;
   let teamsUnsub = null;
+  let contactUnsub = null;
+  let contactFirst = true;
   const watchers = {};      // teamId -> unsubscribe (messages + own read receipt)
   const teamNames = {};     // teamId -> name
   const readAt = {};        // teamId -> ms of my last read receipt from the server (any device)
-  let items = [];           // { id, teamId, teamName, sender, text, ts }
+  let items = [];           // { id, kind: 'team'|'contact', teamId, teamName, sender, text, ts }
   let toastTimer = null;
   let el = {};
 
@@ -35,6 +47,16 @@
   function seenKey() { return 'team_chat_seen_' + (user ? user.uid : 'guest'); }
   function readSeen() { try { return JSON.parse(localStorage.getItem(seenKey()) || '{}') || {}; } catch (e) { return {}; } }
   function writeSeen(m) { try { localStorage.setItem(seenKey(), JSON.stringify(m)); } catch (e) {} }
+
+  // How new a Connect message has to be before this device pings about it. "Read" itself is
+  // server state, so this only stops the same message popping up again after a reload.
+  function contactSeenKey() { return 'contact_seen_' + (user ? user.uid : 'guest'); }
+  function readContactSeen() { try { return Number(localStorage.getItem(contactSeenKey())) || 0; } catch (e) { return 0; } }
+  function writeContactSeen(ts) { try { localStorage.setItem(contactSeenKey(), String(ts)); } catch (e) {} }
+
+  function isAdmin() {
+    return !!(user && user.email && user.email.toLowerCase() === ADMIN_EMAIL);
+  }
 
   /* ---------- UI ---------- */
 
@@ -87,8 +109,8 @@
     bell.id = 'notif-bell';
     bell.className = 'notif-bell';
     bell.hidden = true;
-    bell.title = 'Team chat notifications';
-    bell.setAttribute('aria-label', 'Team chat notifications');
+    bell.title = 'Notifications';
+    bell.setAttribute('aria-label', 'Notifications');
     bell.innerHTML = '<i class="fa-regular fa-bell"></i><span class="notif-badge" id="notif-badge" hidden>0</span>';
     const ref = $('sticky-bell-btn') || top.querySelector('.cloud-pill');
     top.insertBefore(bell, ref && ref.parentNode === top ? ref : null);
@@ -102,9 +124,9 @@
     drawer.className = 'notif-drawer';
     drawer.id = 'notif-drawer';
     drawer.setAttribute('aria-hidden', 'true');
-    drawer.setAttribute('aria-label', 'Team chat notifications');
+    drawer.setAttribute('aria-label', 'Notifications');
     drawer.innerHTML =
-      '<div class="nd-head"><b><i class="fa-regular fa-bell"></i> Team messages</b>' +
+      '<div class="nd-head"><b><i class="fa-regular fa-bell"></i> Notifications</b>' +
       '<span class="nd-actions"><button type="button" id="notif-readall">Mark all read</button>' +
       '<button type="button" id="notif-close" aria-label="Close">&times;</button></span></div>' +
       '<div class="nd-list" id="notif-list"></div>';
@@ -130,7 +152,19 @@
       navLink.appendChild(navBadge);
     }
 
-    el = { bell, badge: $('notif-badge'), navBadge, overlay, drawer, toast, list: $('notif-list') };
+    // Second badge, for unread Connect messages, on the "Admin Inbox" item.
+    const adminLink = document.getElementById('nav-admin');
+    let adminBadge = null;
+    if (adminLink) {
+      adminBadge = document.createElement('span');
+      adminBadge.className = 'nav-badge';
+      adminBadge.id = 'nav-admin-badge';
+      adminBadge.hidden = true;
+      adminBadge.textContent = '0';
+      adminLink.appendChild(adminBadge);
+    }
+
+    el = { bell, badge: $('notif-badge'), navBadge, adminBadge, overlay, drawer, toast, list: $('notif-list') };
 
     bell.addEventListener('click', openDrawer);
     $('notif-close').addEventListener('click', closeDrawer);
@@ -172,6 +206,19 @@
     }
   }
 
+  /* A Connect notification leads to the Developer box, because that is what opens the inbox. */
+  function openContact() {
+    closeDrawer();
+    if (ON_CONTACT_PAGE) {
+      document.dispatchEvent(new CustomEvent('infiniteOpenDevGate'));
+    } else {
+      try { sessionStorage.setItem('infiniteOpenGate', '1'); } catch (e) {}
+      location.href = CONTACT_URL;
+    }
+  }
+
+  const contactItems = () => items.filter((n) => n.kind === 'contact');
+
   function render() {
     if (!built) return;
     const count = items.length;
@@ -181,10 +228,16 @@
     el.badge.hidden = count === 0;
     el.bell.classList.toggle('has-new', count > 0);
     if (el.navBadge) { el.navBadge.textContent = label; el.navBadge.hidden = count === 0; }
+    if (el.adminBadge) {
+      const n = contactItems().length;
+      el.adminBadge.textContent = n > 99 ? '99+' : String(n);
+      el.adminBadge.hidden = n === 0;
+    }
     document.title = (count ? '(' + count + ') ' : '') + BASE_TITLE;
 
     if (!count) {
-      el.list.innerHTML = '<div class="nd-empty">No new messages.<br>You\'ll see them here when a teammate writes in your team chat.</div>';
+      el.list.innerHTML = '<div class="nd-empty">No new messages.<br>You\'ll see them here when a teammate writes in your team chat,'
+        + (isAdmin() ? ' or when someone uses the Connect form.' : '.') + '</div>';
       return;
     }
     el.list.innerHTML = '';
@@ -193,9 +246,13 @@
       btn.type = 'button';
       btn.className = 'nd-item';
       const when = new Date(n.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      btn.innerHTML = '<div class="nd-top"><strong>' + esc(n.sender) + '</strong><span>' + esc(n.teamName) + '</span></div>' +
+      const from = n.kind === 'contact' ? 'Connect page' : n.teamName;
+      btn.innerHTML = '<div class="nd-top"><strong>' + esc(n.sender) + '</strong><span>' + esc(from) + '</span></div>' +
         '<div class="nd-msg">' + esc(n.text) + '</div><div class="nd-time">' + esc(when) + '</div>';
-      btn.addEventListener('click', () => { markRead(n.teamId); openTeam(n.teamId); });
+      btn.addEventListener('click', () => {
+        if (n.kind === 'contact') openContact();
+        else { markRead(n.teamId); openTeam(n.teamId); }
+      });
       el.list.appendChild(btn);
     });
   }
@@ -203,25 +260,46 @@
   function showToast(item) {
     if (!built) return;
     const text = item.text.length > 90 ? item.text.slice(0, 90) + '…' : item.text;
-    el.toast.innerHTML = '<b>' + esc(item.sender) + ' · ' + esc(item.teamName) + '</b>' + esc(text);
+    const from = item.kind === 'contact' ? 'Connect page' : item.teamName;
+    el.toast.innerHTML = '<b>' + esc(item.sender) + ' · ' + esc(from) + '</b>' + esc(text);
     el.toast.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.toast.hidden = true; }, 5000);
   }
 
-  // markRead(null)            -> everything
+  // Marking a Connect message read writes the same "read" flag the inbox uses, so it clears on
+  // every device at once. The rules only allow this for the account that owns the site.
+  function markContactRead(ids) {
+    const db = window.lifeIsShortDb;
+    if (!db) return;
+    for (let i = 0; i < ids.length; i += 20) {
+      const chunk = ids.slice(i, i + 20);
+      try {
+        const batch = db.batch();
+        chunk.forEach((id) => batch.update(db.collection('contactMessages').doc(id), { read: true }));
+        batch.commit().catch((err) => console.warn('contact notifications: mark read failed', err));
+      } catch (e) { console.warn('contact notifications: mark read failed', e); }
+    }
+  }
+
+  // markRead(null)            -> everything (team receipts + the Connect "read" flag)
   // markRead(teamId)          -> that team's unread items
   // markRead(teamId, upToMs)  -> also remember "read up to this message time" (used by the team page)
   function markRead(teamId, upToMs) {
     const seen = readSeen();
     if (teamId && upToMs) seen[teamId] = Math.max(seen[teamId] || 0, upToMs);
-    items.forEach((n) => {
-      if (teamId && n.teamId !== teamId) return;
+    const contactIds = [];
+    items = items.filter((n) => {
+      if (n.kind === 'contact') {
+        if (!teamId) { contactIds.push(n.id); return false; }   // "mark all read" clears these too
+        return true;
+      }
       seen[n.teamId] = Math.max(seen[n.teamId] || 0, n.ts);
+      return teamId ? n.teamId !== teamId : false;
     });
     writeSeen(seen);
-    items = teamId ? items.filter((n) => n.teamId !== teamId) : [];
     render();
+    if (contactIds.length) markContactRead(contactIds);
   }
 
   /* ---------- Firestore watching ---------- */
@@ -234,9 +312,38 @@
 
   function stop() {
     if (teamsUnsub) { teamsUnsub(); teamsUnsub = null; }
+    if (contactUnsub) { contactUnsub(); contactUnsub = null; }
+    contactFirst = true;
     Object.keys(watchers).forEach(unwatch);
     items = [];
     render();
+  }
+
+  /* Connect messages, for the owner account only. "Unread" is the server's own flag, so opening
+     the inbox on another device clears the badge here too. */
+  function watchContact(db) {
+    contactUnsub = db.collection('contactMessages').orderBy('createdAt', 'desc').limit(50)
+      .onSnapshot((snap) => {
+        const seenAt = readContactSeen();
+        const unread = [];
+        let newest = seenAt;
+        snap.docs.forEach((doc) => {
+          const m = doc.data() || {};
+          const ts = msOf(m.createdAt);
+          if (!ts || m.read === true) return;
+          if (ts > newest) newest = ts;
+          const item = {
+            id: doc.id, kind: 'contact', sender: m.name || 'Someone',
+            email: m.email || '', text: m.message || '', ts,
+          };
+          unread.push(item);
+          if (!contactFirst && ts > seenAt) showToast(item);
+        });
+        writeContactSeen(newest);
+        contactFirst = false;
+        items = items.filter((n) => n.kind !== 'contact').concat(unread);
+        render();
+      }, (err) => console.warn('contact notifications', err));
   }
 
   function watchMessages(teamDocs) {
@@ -275,7 +382,7 @@
             const ts = msOf(m.createdAt);
             if (!ts || m.senderId === user.uid || ts <= seenTs || watchingNow) return;
             if (items.some((n) => n.id === change.doc.id)) return;
-            const item = { id: change.doc.id, teamId: doc.id, teamName: teamNames[doc.id], sender: m.senderName || 'Someone', text: m.text || '', ts };
+            const item = { id: change.doc.id, kind: 'team', teamId: doc.id, teamName: teamNames[doc.id], sender: m.senderName || 'Someone', text: m.text || '', ts };
             items.push(item);
             if (!first) showToast(item);
           });
@@ -313,6 +420,7 @@
       if (!db) { if (++tries < 50) setTimeout(attach, 200); return; }
       teamsUnsub = db.collection('teams').where('memberIds', 'array-contains', user.uid)
         .onSnapshot((snap) => watchMessages(snap.docs), (err) => console.warn('team notifications', err));
+      if (isAdmin() && !contactUnsub) watchContact(db);
     };
     attach();
   }

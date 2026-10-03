@@ -344,6 +344,14 @@
     $('dev-gate-close').addEventListener('click', function () { dlg.close(); });
     dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
 
+    // Opened from a notification: team-notify.js sends the bell here, and this page opens the gate.
+    document.addEventListener('infiniteOpenDevGate', openGate);
+    setTimeout(function () {
+      var flag = null;
+      try { flag = sessionStorage.getItem('infiniteOpenGate'); sessionStorage.removeItem('infiniteOpenGate'); } catch (_) {}
+      if (flag) openGate();
+    }, 500);
+
     // clicking anywhere on the card opens the gate, except its own links and buttons
     card.addEventListener('click', function (e) { if (!e.target.closest('a, button')) openGate(); });
     var navAdmin = $('nav-admin');
