@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Life Calendar - Infinite</title>
-  <meta name="description" content="Each square is one week of your life. See how many you've lived and how many remain.">
+  <title>Connect - Infinite</title>
+  <meta name="description" content="Say hello to Darshan Parmar, the developer behind Infinite.">
   <link rel="icon" href="../deserve.png" type="image/png">
   <link rel="stylesheet" href="../static/css/style.css?v=36">
+  <link rel="stylesheet" href="../static/css/contact.css?v=1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -19,6 +20,7 @@
   <script src="../static/js/auth.js?v=10" defer></script>
   <script src="../static/js/team-notify.js?v=2" defer></script>
   <script src="../static/js/ai-chat.js?v=9" defer></script>
+  <script src="../static/js/contact.js?v=1" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -28,17 +30,13 @@
     </div>
     <nav class="side-nav">
       <a class="nav-item" href="../"><i class="fa-solid fa-house"></i><em>Overview</em></a>
-      <a class="nav-item active" href="./"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
+      <a class="nav-item" href="../calendar/"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
       <a class="nav-item" href="../notepad/"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
       <a class="nav-item" href="../team/"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
-        <a class="nav-item" href="../contact/"><i class="fa-solid fa-envelope"></i><em>Connect</em></a>
+      <a class="nav-item active" href="./"><i class="fa-solid fa-envelope"></i><em>Connect</em></a>
     </nav>
     <div class="side-foot">
-      <div class="cad-mini">
-        <div class="lbl"><span>THIS YEAR</span><b id="side-day">DAY –/–</b></div>
-        <div class="track"><div class="fill" id="side-year-fill"></div></div>
-      </div>
-      <div class="sync-row"><span class="sync-dot"></span><span>WEEKS · 53-PER-YEAR GRID</span></div>
+      <div class="sync-row"><span class="sync-dot"></span><span>OPEN · SAY HELLO</span></div>
       <div class="user-chip">
         <div class="avatar" id="user-initial">?</div>
         <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
@@ -48,7 +46,7 @@
 
   <div class="main-wrap">
     <div class="topbar">
-      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>LIFE CALENDAR</b></span>
+      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>CONNECT</b></span>
       <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
       <div class="top-actions">
         <div id="auth-account-actions" class="auth-account-actions" hidden></div>
@@ -59,45 +57,68 @@
       </div>
     </div>
 
+
     <div class="page page-wide">
       <div class="page-head">
         <div>
-          <div class="kicker"><span class="dot"></span>WEEKLY VIEW · <span id="epoch-lbl">THIS YEAR</span></div>
-          <h1 class="page-title">Life Calendar</h1>
-          <div class="page-sub" id="today-line">—</div>
-        </div>
-        <div class="head-actions">
-          <a class="btn" href="../"><i class="fa-solid fa-arrow-left"></i>Back to Overview</a>
+          <div class="kicker"><span class="dot"></span>SAY HELLO · RECRUITERS &amp; BUILDERS WELCOME</div>
+          <h1 class="page-title">Connect</h1>
+          <div class="page-sub">MEET THE DEVELOPER · SEND A MESSAGE · GET A REPLY BY EMAIL</div>
         </div>
       </div>
 
-      <p style="color:var(--muted); font-size:13px; max-width:640px; margin:-6px 0 18px;">
-        Each square represents one week of your life. Filled squares are weeks already lived —
-        <strong style="color:var(--green);" id="weeks-lived">0</strong> weeks lived out of
-        <strong style="color:var(--text);" id="total-weeks">0</strong> in your expected lifespan.
-      </p>
+      <div class="cn-grid">
+        <!-- Developer -->
+        <section class="cn-card" aria-label="Developer">
+          <div class="cn-eyebrow"><i class="fa-solid fa-code"></i>THE DEVELOPER</div>
+          <div class="cn-dev-top">
+            <div class="cn-avatar" id="cn-avatar" aria-hidden="true">D</div>
+            <div>
+              <div class="cn-name">Darshan Parmar</div>
+              <div class="cn-role">DEVELOPER OF INFINITE</div>
+            </div>
+          </div>
+          <p class="cn-hello">
+            <span class="cn-wave">&#128075;</span> <b>Hello!</b> I built Infinite to make every day count.
+            If you are a <b>recruiter</b>, a fellow developer, or just someone who liked what you saw here,
+            I would love to hear from you. Drop a message and I will get back to you by email.
+          </p>
+          <div class="cn-mail-row">
+            <i class="fa-solid fa-envelope"></i>
+            <a class="cn-mail-addr" href="mailto:connect.darshanparmar@gmail.com">connect.darshanparmar@gmail.com</a>
+            <button type="button" class="cn-copy" id="cn-copy" title="Copy email" aria-label="Copy email"><i class="fa-regular fa-copy"></i></button>
+          </div>
+          <div class="cn-actions">
+            <a class="btn btn-green" href="mailto:connect.darshanparmar@gmail.com"><i class="fa-solid fa-paper-plane"></i>Email directly</a>
+          </div>
+        </section>
 
-      <div class="cal-controls">
-        <label for="birthdate">BIRTH DATE</label>
-        <input type="date" id="birthdate">
-        <label for="lifespan">EXPECTED LIFESPAN</label>
-        <input type="number" id="lifespan" min="1" max="120">
-        <button id="update-calendar" class="btn btn-green" type="button"><i class="fa-solid fa-rotate"></i>Update Calendar</button>
-      </div>
-
-      <div class="cal-grid-wrap">
-        <div class="cal-legend">
-          <span><i class="sw lived"></i>Weeks lived</span>
-          <span><i class="sw cur"></i>Current week</span>
-          <span><i class="sw rem"></i>Weeks ahead</span>
-        </div>
-        <div class="cal-grid" id="calendar-grid"></div>
-      </div>
-
-      <div class="cal-stats">
-        <div class="stat-card"><div class="stat-num" id="years-lived">0</div><div class="stat-lbl">YEARS LIVED</div></div>
-        <div class="stat-card"><div class="stat-num" id="years-remaining">0</div><div class="stat-lbl">YEARS REMAINING</div></div>
-        <div class="stat-card"><div class="stat-num" id="percentage-lived">0%</div><div class="stat-lbl">LIFE COMPLETED</div></div>
+        <!-- Message block -->
+        <section class="cn-card" aria-label="Send a message">
+          <div class="cn-eyebrow"><i class="fa-regular fa-comment-dots"></i>SEND A MESSAGE</div>
+          <form class="cn-form" id="cn-form" novalidate>
+            <div class="cn-row">
+              <div class="cn-field">
+                <label for="cn-name-in">YOUR NAME<em>*</em></label>
+                <input id="cn-name-in" type="text" autocomplete="name" maxlength="80" placeholder="e.g. Darshan Parmar">
+              </div>
+              <div class="cn-field">
+                <label for="cn-email-in">YOUR GMAIL / EMAIL<em>*</em></label>
+                <input id="cn-email-in" type="email" autocomplete="email" maxlength="120" placeholder="you@gmail.com">
+              </div>
+            </div>
+            <div class="cn-field">
+              <label for="cn-msg-in">MESSAGE<em>*</em></label>
+              <textarea id="cn-msg-in" maxlength="2000" placeholder="Say hello, share an opportunity, or send feedback…"></textarea>
+            </div>
+            <input type="text" id="cn-hp" class="cn-hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+            <div class="cn-status" id="cn-status" role="status" aria-live="polite"></div>
+            <div class="cn-foot">
+              <button type="submit" class="btn btn-lav cn-send" id="cn-send"><i class="fa-solid fa-paper-plane"></i>Send message</button>
+              <span class="cn-count" id="cn-count">0 / 2000</span>
+            </div>
+          </form>
+        </section>
       </div>
     </div>
   </div>
@@ -160,104 +181,6 @@
       <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
     </section>
   </div>
-
-  <script>
-    const birthdateInput = document.getElementById('birthdate');
-    const lifespanInput = document.getElementById('lifespan');
-    birthdateInput.value = localStorage.getItem('calendarBirthdate') || '1990-01-01';
-    lifespanInput.value = localStorage.getItem('calendarLifespan') || '80';
-
-    function tickClock() {
-      const n = new Date();
-      document.getElementById('utc-clock').textContent =
-        String(n.getUTCHours()).padStart(2,'0') + ':' + String(n.getUTCMinutes()).padStart(2,'0') + ':' + String(n.getUTCSeconds()).padStart(2,'0') + ' UTC';
-      document.getElementById('today-line').textContent = 'TODAY: ' +
-        n.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase();
-    }
-    setInterval(tickClock, 1000); tickClock();
-
-    // sidebar day counter
-    (function () {
-      const n = new Date();
-      const s = new Date(n.getFullYear(), 0, 1);
-      const e = new Date(n.getFullYear() + 1, 0, 1);
-      const doy = Math.floor((n - s) / 864e5) + 1;
-      const total = Math.round((e - s) / 864e5);
-      document.getElementById('side-day').textContent = 'DAY ' + doy + ' / ' + total;
-      document.getElementById('side-year-fill').style.width = (doy / total * 100) + '%';
-      document.getElementById('epoch-lbl').textContent = 'Q' + (Math.floor(n.getMonth() / 3) + 1) + ' ' + n.getFullYear();
-    })();
-
-    function refreshUser() {
-      const name = localStorage.getItem('life_user_name') || (window.lifeIsShortUser && (window.lifeIsShortUser.displayName || window.lifeIsShortUser.email)) || 'Guest';
-      document.getElementById('user-name').textContent = name;
-      document.getElementById('user-initial').textContent = (name || '?').trim().split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
-    }
-    refreshUser();
-    document.addEventListener('lifeIsShortAuthState', refreshUser);
-
-    function generateCalendar() {
-      const birth = new Date(birthdateInput.value + 'T00:00:00');
-      const lifespan = Number(lifespanInput.value);
-      const now = new Date();
-      const grid = document.getElementById('calendar-grid');
-      grid.innerHTML = '';
-      let livedWeeks = 0;
-
-      const birthYear = birth.getFullYear();
-      for (let age = 0; age < lifespan; age++) {
-        const calendarYear = birthYear + age;
-        const start = new Date(calendarYear, 0, 1);
-        const end = new Date(calendarYear + 1, 0, 1);
-        const row = document.createElement('div');
-        row.className = 'cal-year';
-
-        const yl = document.createElement('span');
-        yl.className = 'yl'; yl.textContent = calendarYear;
-        row.appendChild(yl);
-
-        const weeks = Math.round((end - start) / 604800000);
-        for (let week = 0; week < weeks; week++) {
-          const ws = new Date(start); ws.setDate(start.getDate() + week * 7);
-          const we = new Date(ws); we.setDate(ws.getDate() + 7);
-          const sq = document.createElement('div');
-          sq.className = 'cal-week';
-          if (we <= birth) {
-            sq.style.visibility = 'hidden';
-          } else if (we <= now) { sq.classList.add('lived'); livedWeeks++; }
-          else if (ws <= now && now < we) { sq.classList.add('cur'); livedWeeks++; }
-          row.appendChild(sq);
-        }
-
-        const ya = document.createElement('span');
-        ya.className = 'ya'; ya.textContent = 'AGE ' + age;
-        row.appendChild(ya);
-        grid.appendChild(row);
-      }
-
-      const lifeEnd = new Date(birth); lifeEnd.setFullYear(birth.getFullYear() + lifespan);
-      const totalWeeks = Math.round((lifeEnd - birth) / 604800000);
-      const yearsLived = Math.min(lifespan, Math.floor(livedWeeks / 52.14));
-      document.getElementById('weeks-lived').textContent = livedWeeks.toLocaleString();
-      document.getElementById('total-weeks').textContent = totalWeeks.toLocaleString();
-      document.getElementById('years-lived').textContent = yearsLived;
-      document.getElementById('years-remaining').textContent = Math.max(0, lifespan - yearsLived);
-      document.getElementById('percentage-lived').textContent = Math.min(100, livedWeeks / totalWeeks * 100).toFixed(1) + '%';
-    }
-
-    document.getElementById('update-calendar').addEventListener('click', () => {
-      localStorage.setItem('calendarBirthdate', birthdateInput.value);
-      localStorage.setItem('calendarLifespan', lifespanInput.value);
-      generateCalendar();
-    });
-
-    generateCalendar();
-    document.addEventListener('lifeIsShortDataReady', () => {
-      birthdateInput.value = localStorage.getItem('calendarBirthdate') || '1990-01-01';
-      lifespanInput.value = localStorage.getItem('calendarLifespan') || '80';
-      generateCalendar();
-    });
-  </script>
 
   <dialog id="password-dialog" class="auth-password-dialog">
     <form class="auth-form" id="password-form" novalidate>
