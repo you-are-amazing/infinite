@@ -14,3 +14,6 @@ ai-worker/wrangler.toml
 # local agent/editor config, not part of the site
 .kilo/
 .kilocode/
+
+# Firestore rules with the real admin address: kept off GitHub so the account stays out of the repo.
+firestore.rules.deploy
