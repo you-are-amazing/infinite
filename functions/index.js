@@ -1,5 +1,10 @@
 /*
- * Infinite AI — backend.
+ * Infinite AI — backend (ALTERNATIVE, not deployed).
+ *
+ * This is the original Gemini backend. It is kept for reference and is NOT what the live site
+ * talks to: Cloud Functions need the Firebase Blaze plan, so the deployed backend is the free
+ * Cloudflare Worker in ../ai-worker/, which speaks the same request and response shape. See
+ * ../SETUP.md for when to use which. Nothing in the running site depends on this file.
  *
  * One callable function, `chat`. The browser sends the conversation text; this function
  *   1. checks the Firebase login (req.auth) and a per-user daily cap,

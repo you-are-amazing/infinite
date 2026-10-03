@@ -1,9 +1,64 @@
+// Firestore security rules for Infinite.
+//
+// PUBLIC COPY: owner@example.com below is a placeholder for your own account — the one
+// allowed to read every message and to hold the developer key. Replace it before running
+// `firebase deploy --only firestore`, or the admin inbox stays shut for everyone, yourself
+// included. The contact address is not a secret: it is printed on the public Connect page.
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     match /users/{uid}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Contact page messages (top-level collection: /contactMessages/{id}).
+    //  create: anyone, exactly these fields. "uid" is optional and, if present, must be the sender's own.
+    //  read:   the developer (all messages) or a signed-in sender (only their own, matched by uid).
+    //  update/delete: the developer, or the signed-in sender of that message (see below).
+    match /contactMessages/{messageId} {
+      allow create: if request.resource.data.keys()
+                      .hasOnly(['name', 'email', 'message', 'createdAt', 'to', 'uid', 'read'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.email is string
+        && request.resource.data.email.size() > 0
+        && request.resource.data.email.size() <= 120
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 2000
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.to == 'connect.darshanparmar@gmail.com'
+        && (!('uid' in request.resource.data)
+            || (request.auth != null && request.resource.data.uid == request.auth.uid))
+        && (!('read' in request.resource.data) || request.resource.data.read == false);
+      allow read: if request.auth != null && (
+        request.auth.token.email == 'owner@example.com'
+        || ('uid' in resource.data && resource.data.uid == request.auth.uid));
+      // developer: only the "read" flag.  sender (signed in, own message): only the text, and it goes back to unread.
+      allow update: if request.auth != null && (
+        (request.auth.token.email == 'owner@example.com'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']))
+        || ('uid' in resource.data && resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['message', 'editedAt', 'read'])
+          && request.resource.data.message is string
+          && request.resource.data.message.size() > 0
+          && request.resource.data.message.size() <= 2000
+          && request.resource.data.editedAt is timestamp
+          && request.resource.data.read == false));
+      // developer can delete anything; a signed-in sender can delete their own message.
+      allow delete: if request.auth != null && (
+        request.auth.token.email == 'owner@example.com'
+        || ('uid' in resource.data && resource.data.uid == request.auth.uid));
+    }
+
+    // Developer key (a salted PBKDF2 hash only, never the key itself).
+    // Readable and writable by the developer account and nobody else.
+    match /adminConfig/{docId} {
+      allow read, write: if request.auth != null
+        && request.auth.token.email == 'owner@example.com';
     }
 
     match /teams/{teamId} {
@@ -30,7 +85,7 @@ service cloud.firestore {
           (resource.data.senderId == request.auth.uid ||
            get(/databases/$(database)/documents/teams/$(teamId)).data.ownerId == request.auth.uid);
       }
-      // "Seen" receipts: each member writes only their own doc
+    // "Seen" receipts: each member writes only their own doc
       match /reads/{uid} {
         allow read: if request.auth != null &&
           request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;

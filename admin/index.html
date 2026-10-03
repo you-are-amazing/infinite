@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Connect - Infinite</title>
-  <meta name="description" content="Say hello to Darshan Parmar, the developer behind Infinite.">
+  <title>Admin Inbox - Infinite</title>
+  <meta name="robots" content="noindex">
   <link rel="icon" href="../deserve.png" type="image/png">
   <link rel="stylesheet" href="../static/css/style.css?v=36">
-  <link rel="stylesheet" href="../static/css/contact.css?v=7">
+  <link rel="stylesheet" href="../static/css/contact.css?v=6">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -21,7 +21,7 @@
   <script src="../static/js/team-notify.js?v=2" defer></script>
   <script src="../static/js/ai-chat.js?v=9" defer></script>
   <script src="../static/js/dev-key.js?v=2" defer></script>
-  <script src="../static/js/contact.js?v=10" defer></script>
+  <script src="../static/js/admin.js?v=4" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -34,11 +34,11 @@
       <a class="nav-item" href="../calendar/"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
       <a class="nav-item" href="../notepad/"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
       <a class="nav-item" href="../team/"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
-      <a class="nav-item active" href="./"><i class="fa-solid fa-envelope"></i><em>Connect</em></a>
-      <a class="nav-item" id="nav-admin" href="#" hidden><i class="fa-solid fa-user-shield"></i><em>Admin Inbox</em></a>
+      <a class="nav-item" href="../contact/"><i class="fa-solid fa-envelope"></i><em>Connect</em></a>
+      <a class="nav-item active" id="nav-admin" href="./" hidden><i class="fa-solid fa-inbox"></i><em>Admin Inbox</em></a>
     </nav>
     <div class="side-foot">
-      <div class="sync-row"><span class="sync-dot"></span><span>OPEN · SAY HELLO</span></div>
+      <div class="sync-row"><span class="sync-dot"></span><span>PRIVATE · ADMIN</span></div>
       <div class="user-chip">
         <div class="avatar" id="user-initial">?</div>
         <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
@@ -48,7 +48,7 @@
 
   <div class="main-wrap">
     <div class="topbar">
-      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>CONNECT</b></span>
+      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>ADMIN INBOX</b></span>
       <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
       <div class="top-actions">
         <div id="auth-account-actions" class="auth-account-actions" hidden></div>
@@ -63,90 +63,46 @@
     <div class="page page-wide">
       <div class="page-head">
         <div>
-          <div class="kicker"><span class="dot"></span>SAY HELLO · RECRUITERS &amp; BUILDERS WELCOME</div>
-          <h1 class="page-title">Connect</h1>
-          <div class="page-sub">MEET THE DEVELOPER · SEND A MESSAGE · GET A REPLY BY EMAIL</div>
+          <div class="kicker"><span class="dot"></span>ADMIN · PRIVATE TO THE DEVELOPER</div>
+          <h1 class="page-title">Inbox</h1>
+          <div class="page-sub">EVERY MESSAGE SENT THROUGH THE CONNECT FORM · REPLY FROM YOUR OWN MAIL APP</div>
         </div>
       </div>
 
-      <div class="cn-grid">
-        <!-- Developer -->
-        <section class="cn-card cn-dev-card" id="cn-dev-card" aria-label="Developer" aria-haspopup="dialog" tabindex="0">
-          <div class="cn-eyebrow"><i class="fa-solid fa-code"></i>THE DEVELOPER<span class="cn-lock-hint" title="Developer only"><i class="fa-solid fa-lock"></i></span></div>
-          <div class="cn-dev-top">
-            <div class="cn-avatar" id="cn-avatar" aria-hidden="true">D</div>
-            <div>
-              <div class="cn-name">Darshan Parmar</div>
-              <div class="cn-role">DEVELOPER OF INFINITE</div>
-            </div>
-          </div>
-          <p class="cn-hello">
-            <span class="cn-wave">&#128075;</span> <b>Hello!</b> I built Infinite to make every day count.
-            If you are a <b>recruiter</b>, a fellow developer, or just someone who liked what you saw here,
-            I would love to hear from you. Drop a message and I will get back to you by email.
-          </p>
-          <div class="cn-mail-row">
-            <i class="fa-solid fa-envelope"></i>
-            <a class="cn-mail-addr" href="mailto:connect.darshanparmar@gmail.com">connect.darshanparmar@gmail.com</a>
-            <button type="button" class="cn-copy" id="cn-copy" title="Copy email" aria-label="Copy email"><i class="fa-regular fa-copy"></i></button>
-          </div>
-          <div class="cn-actions">
-            <a class="btn btn-green" href="mailto:connect.darshanparmar@gmail.com"><i class="fa-solid fa-paper-plane"></i>Email directly</a>
-          </div>
-        </section>
+      <section class="cn-card ad-lock" id="ad-lock" aria-live="polite">
+        <i class="fa-solid fa-lock"></i>
+        <p id="ad-lock-msg">Checking your account…</p>
+      </section>
 
-        <!-- Message block -->
-        <section class="cn-card" aria-label="Send a message">
-          <div class="cn-eyebrow"><i class="fa-regular fa-comment-dots"></i>SEND A MESSAGE</div>
-          <form class="cn-form" id="cn-form" novalidate>
-            <div class="cn-row">
-              <div class="cn-field">
-                <label for="cn-name-in">YOUR NAME<em>*</em></label>
-                <input id="cn-name-in" type="text" autocomplete="name" maxlength="80" placeholder="e.g. Darshan Parmar">
-              </div>
-              <div class="cn-field">
-                <label for="cn-email-in">YOUR GMAIL / EMAIL<em>*</em></label>
-                <input id="cn-email-in" type="email" autocomplete="email" maxlength="120" placeholder="you@gmail.com">
-              </div>
-            </div>
-            <div class="cn-field">
-              <label for="cn-msg-in">MESSAGE<em>*</em></label>
-              <textarea id="cn-msg-in" maxlength="2000" placeholder="Say hello, share an opportunity, or send feedback…"></textarea>
-            </div>
-            <input type="text" id="cn-hp" class="cn-hp" tabindex="-1" autocomplete="off" aria-hidden="true">
-            <div class="cn-status" id="cn-status" role="status" aria-live="polite"></div>
-            <div class="cn-foot">
-              <button type="submit" class="btn btn-lav cn-send" id="cn-send"><i class="fa-solid fa-paper-plane"></i>Send message</button>
-              <span class="cn-count" id="cn-count">0 / 2000</span>
-            </div>
-          </form>
-        </section>
-      </div>
-
-      <section class="cn-inbox" id="cn-mine" aria-label="Your sent messages">
+      <section class="cn-inbox" id="ad-inbox" hidden aria-label="All messages">
         <div class="cn-inbox-head">
-          <div class="cn-inbox-t"><i class="fa-solid fa-paper-plane"></i>YOUR SENT MESSAGES</div>
-          <span class="cn-inbox-n" id="cn-mine-count">0</span>
+          <div class="cn-inbox-t"><i class="fa-solid fa-inbox"></i>ALL MESSAGES</div>
+          <span class="cn-inbox-n" id="ad-count">0</span>
         </div>
-        <div class="cn-inbox-list" id="cn-mine-list"></div>
-        <div class="cn-inbox-empty" id="cn-mine-empty">
-          You have not sent a message yet. Anything you send through the form above will be listed here.
+        <div class="ad-bar">
+          <button type="button" class="ad-tab on" data-f="all">ALL</button>
+          <button type="button" class="ad-tab" data-f="unread">UNREAD <span id="ad-unread">0</span></button>
+          <button type="button" class="ad-tab" id="ad-chkey"><i class="fa-solid fa-key"></i> CHANGE KEY</button>
+          <button type="button" class="ad-tab" id="ad-relock"><i class="fa-solid fa-lock"></i> LOCK</button>
+          <input type="search" class="ad-search" id="ad-search" placeholder="Search name, email or text…" aria-label="Search messages">
         </div>
+        <div class="cn-inbox-list" id="ad-list"></div>
+        <div class="cn-inbox-empty" id="ad-empty" hidden>No messages to show.</div>
       </section>
     </div>
   </div>
 
-  <dialog id="dev-gate" class="cn-gate" aria-labelledby="dev-gate-title">
-    <form id="dev-gate-form" novalidate>
-      <div class="cn-gate-icon"><i class="fa-solid fa-lock" id="dev-gate-icon"></i></div>
-      <h3 id="dev-gate-title"></h3>
-      <p id="dev-gate-text"></p>
-      <input type="password" id="dev-gate-key" autocomplete="off" hidden>
-      <input type="password" id="dev-gate-key2" autocomplete="off" placeholder="Repeat the key" hidden>
-      <div class="cn-gate-err" id="dev-gate-err" role="alert"></div>
+  <dialog id="key-dialog" class="cn-gate" aria-labelledby="key-title">
+    <form id="key-form" novalidate>
+      <div class="cn-gate-icon"><i class="fa-solid fa-key"></i></div>
+      <h3 id="key-title">Change your key</h3>
+      <input type="password" id="key-old" autocomplete="off" placeholder="Current key">
+      <input type="password" id="key-new" autocomplete="off" placeholder="New key (min 6 characters)">
+      <input type="password" id="key-new2" autocomplete="off" placeholder="Repeat the new key">
+      <div class="cn-gate-err" id="key-err" role="alert"></div>
       <div class="cn-gate-actions">
-        <button type="button" class="btn" id="dev-gate-close">Close</button>
-        <button type="submit" class="btn btn-green" id="dev-gate-ok" hidden>Open</button>
+        <button type="button" class="btn" id="key-cancel">Cancel</button>
+        <button type="submit" class="btn btn-green" id="key-save">Save key</button>
       </div>
     </form>
   </dialog>

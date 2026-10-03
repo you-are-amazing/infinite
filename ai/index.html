@@ -61,6 +61,14 @@
     .ax-pillbox .g{width:9px;height:9px;border-radius:50%;background:var(--green)}
     .ax-pillbox.m{font:13.5px 'JetBrains Mono',monospace;color:var(--muted)}
     .ax-pillbox.m b{color:var(--green)}.ax-pillbox.m u{text-decoration:none;color:var(--amber);font-weight:700}
+    .ax-note-control{position:relative;flex:none}
+    .ax-note-trigger{display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font-size:12px;font-weight:600;white-space:nowrap}
+    .ax-note-trigger i{color:var(--green)}
+    .ax-note-trigger:hover,.ax-note-trigger[aria-expanded="true"]{border-color:var(--green)}
+    .ax-note-panel{position:absolute;top:calc(100% + 8px);right:0;z-index:120;width:min(360px,calc(100vw - 24px));padding:15px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:var(--shadow);color:var(--muted);font-size:13px;line-height:1.55}
+    .ax-note-panel[hidden]{display:none}
+    .ax-note-panel strong{display:block;margin-bottom:5px;color:var(--text);font-size:13px}
+    .ax-note-panel p{margin:0}
     .ax-top .sp{flex:1}
     .ax-dash{padding:9px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px;font-weight:500}
     .ax-dash:hover{border-color:var(--green)}
@@ -117,6 +125,7 @@
 
     @media (max-width:1400px){.ax-top .ax-pillbox:not(.m){display:none}}
     @media (max-width:1200px){#t-year{display:none}}
+    @media (max-width:680px){.ax-top{gap:7px;padding:10px}.ax-crumb{font-size:12px}.ax-dash{padding:7px 9px;font-size:12px}.ax-note-trigger{width:34px;height:34px;justify-content:center;padding:0}.ax-note-label{display:none}.ax-note-panel{position:fixed;top:60px;right:12px}}
     @media (max-width:1100px){.ax-side{position:fixed;z-index:50;height:100%;margin-left:-300px}body.open-side .ax-side{margin-left:0}
       body.open-side::before{content:"";position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55)}
       .ax-menu{display:grid;place-items:center;flex:none;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text)}
@@ -172,6 +181,15 @@
       <span class="ax-crumb">INFINITE &nbsp;›&nbsp; <b>AI ASSISTANT</b></span>
       <span class="ax-pillbox m" id="t-year">2026: <b>–</b> | – elapsed <u>– left</u></span>
       <span class="sp"></span>
+      <div class="ax-note-control">
+        <button class="ax-note-trigger" id="ax-note-trigger" type="button" aria-label="Infinite AI note" aria-controls="ax-note-panel" aria-expanded="false" title="Infinite AI note">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i><span class="ax-note-label">Infinite AI note</span>
+        </button>
+        <div class="ax-note-panel" id="ax-note-panel" role="note" hidden>
+          <strong>What Infinite AI can do</strong>
+          <p>It can help you plan from your goals and notes, suggest new goals, mark an existing goal complete, and draft notes. Nothing is saved until you choose Add. It cannot search the web or edit your calendar, Team Goals, team chat, or shared docs.</p>
+        </div>
+      </div>
       <span class="ax-pillbox m clk"><i class="fa-regular fa-clock" style="color:var(--green)"></i><span id="utc-clock">--:--:-- UTC</span></span>
       <a class="ax-dash" href="../">Dashboard</a>
     </div>
@@ -196,7 +214,7 @@
         </div>
       </div>
     </div>
-    <div class="ax-note" id="ax-note">Infinite AI interacts directly with your calendar, goals, and notes. Changes will ask for approval before writing.</div>
+    <div class="ax-note" id="ax-note">Plan with your goals and notes. Suggestions can add goals, complete goals, or draft notes; nothing changes until you approve them.</div>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -511,6 +529,24 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(this.value); }
     });
     $('ax-new').onclick = function () { if (busy) return; cur = null; drawChats(); drawThread(); $('ax-input').focus(); document.body.classList.remove('open-side'); };
+    var noteTrigger = $('ax-note-trigger'), notePanel = $('ax-note-panel');
+    noteTrigger.onclick = function () {
+      notePanel.hidden = !notePanel.hidden;
+      noteTrigger.setAttribute('aria-expanded', String(!notePanel.hidden));
+    };
+    document.addEventListener('click', function (e) {
+      if (!notePanel.hidden && !e.target.closest('.ax-note-control')) {
+        notePanel.hidden = true;
+        noteTrigger.setAttribute('aria-expanded', 'false');
+      }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !notePanel.hidden) {
+        notePanel.hidden = true;
+        noteTrigger.setAttribute('aria-expanded', 'false');
+        noteTrigger.focus();
+      }
+    });
     $('ax-menu').onclick = function () {
       var open;
       if (window.matchMedia('(max-width: 1100px)').matches) {
