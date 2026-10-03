@@ -54,22 +54,22 @@ Then visit http://127.0.0.1:5500
 5. Create a **Firestore** database and publish the rules. They live in **`firestore.rules`** in this repo — copy
    that whole file into **Firestore > Rules** and press Publish. The same text is reproduced below for reference;
    if the two ever disagree, `firestore.rules` is the one that is deployed.
-6. **Before you publish:** replace `owner@example.com` in that file with your own account. It is a placeholder, and
-   the admin inbox stays shut for everybody — you included — until you do.
+6. Publish the file as it stands. The admin address is already filled in, so the admin inbox works as soon as you
+   press Publish.
 
-> The address is a placeholder in this public copy on purpose. Nothing else here is a secret: the contact address is
-> printed on the public Connect page, and the Firebase Web API key ships in every page that uses Firebase. Real
-> secrets (the AI provider token, the Gemini key) are never committed — see [Not in this repo](#not-in-this-repo).
+> The admin address is not a secret: it is visible in this repository, and the Firebase Web API key ships in every
+> page that uses Firebase. Real secrets (the AI provider token, the Gemini key) are never committed — see
+> [Not in this repo](#not-in-this-repo). Knowing the address is not access, though — every admin-only rule below also
+> requires the request to come from a signed-in session on that account.
 
 The public copy of `firestore.rules` opens with this note:
 
 ```
 // Firestore security rules for Infinite.
 //
-// PUBLIC COPY: owner@example.com below is a placeholder for your own account — the one
-// allowed to read every message and to hold the developer key. Replace it before running
-// `firebase deploy --only firestore`, or the admin inbox stays shut for everyone, yourself
-// included. The contact address is not a secret: it is printed on the public Connect page.
+// The developer account (parmardarshan918@gmail.com) is the admin: it reads every contact
+// message, holds the developer key, and publishes the developer photo.
+
 ```
 
 And the rules themselves, which are the same text:
@@ -105,11 +105,11 @@ service cloud.firestore {
             || (request.auth != null && request.resource.data.uid == request.auth.uid))
         && (!('read' in request.resource.data) || request.resource.data.read == false);
       allow read: if request.auth != null && (
-        request.auth.token.email == 'owner@example.com'
+        request.auth.token.email == 'parmardarshan918@gmail.com'
         || ('uid' in resource.data && resource.data.uid == request.auth.uid));
       // developer: only the "read" flag.  sender (signed in, own message): only the text, and it goes back to unread.
       allow update: if request.auth != null && (
-        (request.auth.token.email == 'owner@example.com'
+        (request.auth.token.email == 'parmardarshan918@gmail.com'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']))
         || ('uid' in resource.data && resource.data.uid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['message', 'editedAt', 'read'])
@@ -120,15 +120,26 @@ service cloud.firestore {
           && request.resource.data.read == false));
       // developer can delete anything; a signed-in sender can delete their own message.
       allow delete: if request.auth != null && (
-        request.auth.token.email == 'owner@example.com'
+        request.auth.token.email == 'parmardarshan918@gmail.com'
         || ('uid' in resource.data && resource.data.uid == request.auth.uid));
     }
 
-    // Developer key (a salted PBKDF2 hash only, never the key itself).
-    // Readable and writable by the developer account and nobody else.
+    // Developer's public profile photo (a small image). Anyone can read it; only the admin can write it.
+    match /publicProfile/{docId} {
+      allow read: if true;
+      allow create, update: if request.auth != null
+        && request.auth.token.email == 'parmardarshan918@gmail.com'
+        && request.resource.data.keys().hasOnly(['photo', 'updatedAt'])
+        && request.resource.data.photo is string
+        && request.resource.data.photo.size() < 100000;
+      allow delete: if request.auth != null
+        && request.auth.token.email == 'parmardarshan918@gmail.com';
+    }
+
+    // Developer key (hash only). Readable and writable by the developer's account and nobody else.
     match /adminConfig/{docId} {
       allow read, write: if request.auth != null
-        && request.auth.token.email == 'owner@example.com';
+        && request.auth.token.email == 'parmardarshan918@gmail.com';
     }
 
     match /teams/{teamId} {
@@ -155,7 +166,7 @@ service cloud.firestore {
           (resource.data.senderId == request.auth.uid ||
            get(/databases/$(database)/documents/teams/$(teamId)).data.ownerId == request.auth.uid);
       }
-    // "Seen" receipts: each member writes only their own doc
+      // "Seen" receipts: each member writes only their own doc
       match /reads/{uid} {
         allow read: if request.auth != null &&
           request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
@@ -409,7 +420,7 @@ Kept out on purpose, so a fork cannot walk into the live project:
 
 | Missing | Where it lives instead |
 | --- | --- |
-| `owner@example.com`, your real admin address | only in the rules you publish to your own Firebase project |
+| the admin email address | committed, and readable here — the rules need it, and an email is not a credential |
 | `HF_TOKEN` (AI provider) | `npx wrangler secret put HF_TOKEN` — a Worker secret |
 | `GEMINI_API_KEY` | a GitHub Actions secret, for the feed only |
 | `ai-worker/wrangler.toml` | gitignored; `wrangler.example.toml` shows the shape |

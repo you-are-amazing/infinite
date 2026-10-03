@@ -1,9 +1,7 @@
 // Firestore security rules for Infinite.
 //
-// PUBLIC COPY: owner@example.com below is a placeholder for your own account — the one
-// allowed to read every message and to hold the developer key. Replace it before running
-// `firebase deploy --only firestore`, or the admin inbox stays shut for everyone, yourself
-// included. The contact address is not a secret: it is printed on the public Connect page.
+// The developer account (parmardarshan918@gmail.com) is the admin: it reads every contact
+// message, holds the developer key, and publishes the developer photo.
 
 rules_version = '2';
 service cloud.firestore {
@@ -35,11 +33,11 @@ service cloud.firestore {
             || (request.auth != null && request.resource.data.uid == request.auth.uid))
         && (!('read' in request.resource.data) || request.resource.data.read == false);
       allow read: if request.auth != null && (
-        request.auth.token.email == 'owner@example.com'
+        request.auth.token.email == 'parmardarshan918@gmail.com'
         || ('uid' in resource.data && resource.data.uid == request.auth.uid));
       // developer: only the "read" flag.  sender (signed in, own message): only the text, and it goes back to unread.
       allow update: if request.auth != null && (
-        (request.auth.token.email == 'owner@example.com'
+        (request.auth.token.email == 'parmardarshan918@gmail.com'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']))
         || ('uid' in resource.data && resource.data.uid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['message', 'editedAt', 'read'])
@@ -50,15 +48,26 @@ service cloud.firestore {
           && request.resource.data.read == false));
       // developer can delete anything; a signed-in sender can delete their own message.
       allow delete: if request.auth != null && (
-        request.auth.token.email == 'owner@example.com'
+        request.auth.token.email == 'parmardarshan918@gmail.com'
         || ('uid' in resource.data && resource.data.uid == request.auth.uid));
     }
 
-    // Developer key (a salted PBKDF2 hash only, never the key itself).
-    // Readable and writable by the developer account and nobody else.
+    // Developer's public profile photo (a small image). Anyone can read it; only the admin can write it.
+    match /publicProfile/{docId} {
+      allow read: if true;
+      allow create, update: if request.auth != null
+        && request.auth.token.email == 'parmardarshan918@gmail.com'
+        && request.resource.data.keys().hasOnly(['photo', 'updatedAt'])
+        && request.resource.data.photo is string
+        && request.resource.data.photo.size() < 100000;
+      allow delete: if request.auth != null
+        && request.auth.token.email == 'parmardarshan918@gmail.com';
+    }
+
+    // Developer key (hash only). Readable and writable by the developer's account and nobody else.
     match /adminConfig/{docId} {
       allow read, write: if request.auth != null
-        && request.auth.token.email == 'owner@example.com';
+        && request.auth.token.email == 'parmardarshan918@gmail.com';
     }
 
     match /teams/{teamId} {
@@ -85,7 +94,7 @@ service cloud.firestore {
           (resource.data.senderId == request.auth.uid ||
            get(/databases/$(database)/documents/teams/$(teamId)).data.ownerId == request.auth.uid);
       }
-    // "Seen" receipts: each member writes only their own doc
+      // "Seen" receipts: each member writes only their own doc
       match /reads/{uid} {
         allow read: if request.auth != null &&
           request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
