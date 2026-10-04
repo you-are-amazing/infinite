@@ -94,6 +94,7 @@ function setAuthOverlayVisible(isVisible) {
   if (!overlay) return;
   overlay.hidden = !isVisible;
   document.body.classList.toggle('auth-lock', isVisible);
+  if (isVisible) AuthPixels.start(); else AuthPixels.stop();
 }
 
 function updateSiteGreeting() {
@@ -116,13 +117,20 @@ function readableAuthError(error) {
     'auth/email-already-in-use': 'An account already uses that email.',
     'auth/weak-password': 'Use a stronger password with at least 6 characters.',
     'auth/requires-recent-login': 'Please sign in again before changing your password.',
-    'auth/too-many-requests': 'Too many attempts. Please wait and try again.'
+    'auth/too-many-requests': 'Too many attempts. Please wait and try again.',
+    'auth/missing-email': 'Enter your email address.',
+    'auth/user-disabled': 'This account has been disabled.',
+    'auth/network-request-failed': 'Network problem. Check your connection and try again.',
+    'auth/popup-blocked': 'Your browser blocked the Google sign-in window. Allow pop-ups and try again.',
+    'auth/account-exists-with-different-credential': 'An account already exists with that email using a different sign-in method.',
+    'auth/operation-not-allowed': 'This sign-in method is not enabled yet in Firebase.',
+    'auth/unauthorized-domain': 'This website is not authorised for Google sign-in yet. Add it under Firebase > Authentication > Settings > Authorized domains.'
   };
   return messages[error.code] || 'Something went wrong. Please try again.';
 }
 
 function showPasswordReminder() {
-  alert('Please save your password somewhere else too. This site does not offer password recovery.');
+  alert('Please keep your password somewhere safe. If you ever forget it, use "Forgot password?" on the sign-in page.');
 }
 
 function setAccountActions(user) {
@@ -149,7 +157,7 @@ function setAccountActions(user) {
     passwordButton.className = 'auth-inline-button';
     passwordButton.textContent = 'Change password';
     passwordButton.addEventListener('click', showPasswordForm);
-    actions.appendChild(passwordButton);
+    if (hasPasswordProvider(user)) actions.appendChild(passwordButton);
 
     const logoutButton = document.createElement('button');
     logoutButton.type = 'button';
@@ -189,6 +197,8 @@ function setupPasswordForm() {
   const form = document.getElementById('password-form');
   const dialog = document.getElementById('password-dialog');
   if (!form || !dialog) return;
+  const pwWarning = dialog.querySelector('.auth-password-warning');
+  if (pwWarning) pwWarning.textContent = 'Please keep your new password somewhere safe. If you forget it, use "Forgot password?" on the sign-in page.';
 
   document.getElementById('password-cancel')?.addEventListener('click', () => dialog.close());
   form.addEventListener('submit', async (event) => {
@@ -227,65 +237,336 @@ function setupPasswordForm() {
   });
 }
 
-function hideAllAuthSteps() {
-  document.getElementById('auth-choice-buttons')?.setAttribute('hidden', '');
-  document.getElementById('auth-form')?.setAttribute('hidden', '');
-  document.getElementById('auth-guest-confirm')?.setAttribute('hidden', '');
+/* ------------------------------------------------------------------
+ * Auth page: liquid-pixel infinity (left) + Sign in / Sign up / Guest panel (right).
+ * Built here so every page that loads auth.js gets the same page; it replaces
+ * the old #auth-overlay markup and keeps the same element ids.
+ * ------------------------------------------------------------------ */
+const AUTH_ART_PAL = [[236,255,214],[236,255,213],[227,252,192],[204,246,134],[190,242,100],[163,228,97],[131,204,23],[125,200,29],[112,201,45],[93,198,58],[101,191,45],[65,192,85],[38,188,110],[21,185,125],[16,185,129],[111,177,26],[90,178,46],[92,162,32],[91,152,25],[41,176,97],[18,176,120],[35,158,89],[81,138,25],[76,125,19],[73,115,14],[71,112,14],[34,138,74],[33,119,59],[63,110,21],[47,108,36],[20,105,61],[10,102,70],[9,102,71],[0,0,0]];
+const AUTH_ART_ROWS = ["..................sssssssssss...........................................00002344444..................",".................sssssssssssss.........................................0000023444444.................",".................nnnnnnnnnnnnnm.......................................00000023444444.................","................fhiiiiiiiiiiihha.....................................0000000234444444................","...........pnif77ffffffffffffaaaahmss...........................00000000000023444444444444...........","..........oonif77777788888888888ahmss...........................000000000000234444444444444..........","..........mmiff77777778888888888aghmmn.........................0000000000000234444444455559..........","........pnihff777777777788888888aaghhmss.....................000000000000000234444444455bbjqv........",".......ppmif777777777777888888888aaahmss.....................00000000000000023444444445bcclqvv.......",".......mmif777777fff777788aagaa8888aghmnn...................000000000000000023444444555bcklqww.......",".......iiff77777ffihff....ghihga888aaghims.................0000000000000000....444455bbcckklll.......",".......ff7777777fimnm......mnmha888aaaagmnt...............0000000000000000......4445bcccddkkkk.......",".......77666777ffmos.......ssnha8aaaaaaghmtt.............22211000000000000.......445bkkkdddddk.......","......hf76667ffhimo.........snhaagghggaaghmmn...........33322100000000000.........5bjlkkdddddkl......","....poif76667fimmn...............hmmhg99gggmmtt.......44433322000000...............bqqlkkddddkqwv....","....ooif76777hmpp.................ttmg99999gmtt.......4444433211100.................vvwlkddddkqwv....","....iiff77fffimp...................tmg99999ghmmt.....4444444332221...................vwllkkkdklqq....","....fff767fiimn.....................hg99999gggmmtma54444444433332.....................wqqlkkdkkkl....","....77766fimoo.......................999999999gmtma5444444444444.......................wwwlkeddkk....","....66666finpp........................99999999ghmh8544444444444........................vvwlkeeeee....","....66666finpp.........................9999999gggg854444444444.........................vvwlkeeeee....","....66666finpp..........................99999999g955444444444..........................vvwlkeeeee....","...766666finpp..........................999999999955444444444..........................vvwlkeeeeek...","...f766667fmp...........................gggg99999995555444444...........................vwlkeeeekk...",".pnif66667f.............................ttmgg9999999955444444.............................kkeeeeklww.","ppnif66666..............................tttmg9999bbbb95444444..............................eeeeeklwww","ppnif66666...............................ttmggg9bbbbb9955544...............................eeeeeklwww","ppnif66666.................................tmmggbbbbbbgga8.................................eeeeeklwww","ppnif66666..................................ttqgbbbbbbqtt..................................eeeeeklwww","ppnif66666..................................ttrgbbbbblrtt..................................eeeeeklwww","ppnif66666..................................ttrgbbbbblrtt..................................eeeeeklwww","ppnif66666..................................ttrgbbbbblrtt..................................eeeeeklwww","ppnif66666..................................ttqgbbbbblqtt..................................eeeeeklwww","ppnif66666.................................tmmggbbbbbbqqrr.................................eeeeeklwww","ppnif66666...............................ttmggg9bbbbbbbbqqtt...............................eeeeeklwww","ppnif66666..............................tttmg9999bbbbbbbbqttt..............................eeeeeklwww",".pnif66667f.............................ttmgg9999bbbbbbbbqqrr.............................kkeeeeklww.","...f766667fmp...........................gggg999999bbbbbbbblll...........................vwlkeeeekk...","...766666finpp..........................9999999999bbbbbbbbbjj..........................vvwlkeeeeek...","....66666finpp..........................99999999ggbbbbbbbbbbb..........................vvwlkeeeee....","....66666finpp.........................9999999ggghqqqlbbbbbbbb.........................vvwlkeeeee....","....66666finpp........................99999999ghmtrrqqjbbbbbbbb........................vvwlkeeeee....","....77766fimoo.......................999999999gmtttrrqljjbbbbbbj.......................wwwlkeddkk....","....fff767fiimn.....................hg99999gggmmtttrrqqlljjbbbbjl.....................wqqlkkdkkkl....","....iiff77fffimp...................tmg99999ghmmt.....rqqqljbbbjlqu...................vwllkkkdklqq....","....ooif76777hmpp.................ttmg99999gmtt.......uuqljbbbjlquu.................vvwlkddddkqwv....","....poif76667fimmn...............hmmhg99gggmmtt.......uurqljjjjlqqqq...............wwqlkkddddkqwv....","......hf76667ffhimo.........snhaagghggaaghmmn...........rqqqljbjllljcjlru.........vqqlkkdddddkl......",".......77666777ffmos.......ssnha8aaaaaaghmtt.............rrqljbjjjjjcjlruu.......vvqlkkkdddddk.......",".......ff7777777fimnm......mnmha888aaaagmnt...............urqljjjjcccjlqrr......qwwlkdddddkkkk.......",".......iiff77777ffihff....ghihga888aaghims.................rqqlljcccccjlqll....kllllkddddkklll.......",".......mmif777777fff777788aagaa8888aghmnn...................rrqljcccccjjjjccccddkkkkkddddklqww.......",".......ppmif777777777777888888888aaahmss.....................urqlcccccccccccccddddddddddkklwvv.......","........pnihff777777777788888888aaghhmss.....................urqqlljccccccccccddddddddkkllqwv........","..........mmiff77777778888888888aghmmn.........................rqqllccccccccccddddddddklqqq..........","..........oonif77777788888888888ahmss...........................uuqljcccccccccddddddddkqvvv..........","...........pnif77ffffffffffffaaaahmss...........................uuqljcjjllllllkkkkkkkdkqvv...........","................fhiiiiiiiiiiihha.....................................jllqqqqqqqqqqqll................",".................nnnnnnnnnnnnnm.......................................qvvvvvvvvvvvvv.................",".................sssssssssssss.........................................vvvvvvvvvvvvv.................","..................sssssssssss...........................................vvvvvvvvvvv.................."];
+const AUTH_SCRIPT_SRC = document.currentScript ? document.currentScript.src : '';
+function authLogoUrl() {
+  try { return AUTH_SCRIPT_SRC ? new URL('../../deserve.png', AUTH_SCRIPT_SRC).href : ''; } catch (e) { return ''; }
+}
+const AUTH_BG_PALETTE = [[10,28,22],[14,38,30],[18,48,36],[12,32,26],[22,58,44],[8,22,18],[26,66,50],[16,42,32]];
+
+const AuthPixels = (() => {
+  const ART_W = AUTH_ART_ROWS[0].length, ART_H = AUTH_ART_ROWS.length;
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const mouse = { x: -9999, y: -9999, vx: 0, vy: 0, radius: 120 };
+  let canvas, ctx, host, raf = 0, running = false;
+  let width = 0, height = 0, pixelSize = 10, gap = 1, particles = [];
+
+  function resize() {
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    width = Math.floor(rect.width);
+    height = Math.floor(rect.height);
+    if (!width || !height) { particles = []; return; }
+    canvas.width = width;
+    canvas.height = height;
+    // one grid cell = one art pixel, so background and infinity pixels are the same size
+    const pitch = Math.max(3, Math.floor(Math.min(width * 0.85 / ART_W, height * 0.85 / ART_H)));
+    gap = Math.max(1, Math.round(pitch * 0.08));
+    pixelSize = pitch - gap;
+    mouse.radius = Math.max(90, pitch * 14);
+    const cols = Math.ceil(width / pitch), rows = Math.ceil(height / pitch);
+    const offX = Math.round((cols - ART_W) / 2), offY = Math.round((rows - ART_H) / 2);
+    particles = [];
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const ox = x * pitch + pixelSize / 2, oy = y * pitch + pixelSize / 2;
+        const u = x - offX, v = y - offY;
+        const ch = (u >= 0 && u < ART_W && v >= 0 && v < ART_H) ? AUTH_ART_ROWS[v][u] : '.';
+        let color;
+        if (ch !== '.') {
+          color = AUTH_ART_PAL[parseInt(ch, 36)];
+        } else {
+          const c = AUTH_BG_PALETTE[Math.floor(Math.random() * AUTH_BG_PALETTE.length)];
+          const b = 0.85 + Math.random() * 0.3;
+          color = [Math.min(255, Math.floor(c[0] * b)), Math.min(255, Math.floor(c[1] * b)), Math.min(255, Math.floor(c[2] * b))];
+        }
+        particles.push({ ox, oy, x: ox, y: oy, vx: 0, vy: 0, color, size: pixelSize * (ch !== '.' ? 1 : 0.9 + Math.random() * 0.2) });
+      }
+    }
+    draw();
+  }
+
+  function update() {
+    const maxDisp = Math.max(4, (pixelSize + gap) * 0.8);
+    mouse.vx *= 0.9; mouse.vy *= 0.9;
+    for (const p of particles) {
+      p.vx += (p.ox - p.x) * 0.1;
+      p.vy += (p.oy - p.y) * 0.1;
+      const dx = p.x - mouse.x, dy = p.y - mouse.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < mouse.radius) {
+        const f = Math.pow(1 - dist / mouse.radius, 2);
+        p.vx += mouse.vx * f * 0.35;
+        p.vy += mouse.vy * f * 0.35;
+        if (dist > 0.1) { p.vx += (dx / dist) * f * 1.2; p.vy += (dy / dist) * f * 1.2; }
+      }
+      p.vx *= 0.8; p.vy *= 0.8;
+      p.x += p.vx; p.y += p.vy;
+      const hx = p.x - p.ox, hy = p.y - p.oy, d = Math.sqrt(hx * hx + hy * hy);
+      if (d > maxDisp) { p.x = p.ox + (hx / d) * maxDisp; p.y = p.oy + (hy / d) * maxDisp; }
+    }
+  }
+
+  function draw() {
+    if (!ctx || !width) return;
+    ctx.fillStyle = '#07110d';
+    ctx.fillRect(0, 0, width, height);
+    for (const p of particles) {
+      const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+      const s = p.size * (1 + Math.min(speed * 0.015, 0.25));
+      ctx.fillStyle = 'rgb(' + p.color[0] + ',' + p.color[1] + ',' + p.color[2] + ')';
+      ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+    }
+  }
+
+  function loop() {
+    if (!running) return;
+    update();
+    draw();
+    raf = requestAnimationFrame(loop);
+  }
+
+  function setMouse(x, y) {
+    const rect = canvas.getBoundingClientRect();
+    const nx = x - rect.left, ny = y - rect.top;
+    if (mouse.x > -999) {
+      mouse.vx = mouse.vx * 0.6 + (nx - mouse.x) * 0.4;
+      mouse.vy = mouse.vy * 0.6 + (ny - mouse.y) * 0.4;
+    }
+    mouse.x = nx; mouse.y = ny;
+  }
+  function clearMouse() { mouse.x = -9999; mouse.y = -9999; }
+
+  return {
+    mount(canvasEl, hostEl) {
+      canvas = canvasEl; host = hostEl; ctx = canvas.getContext('2d');
+      host.addEventListener('mousemove', (e) => setMouse(e.clientX, e.clientY));
+      host.addEventListener('mouseleave', clearMouse);
+      host.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t) setMouse(t.clientX, t.clientY); }, { passive: true });
+      host.addEventListener('touchend', clearMouse);
+      window.addEventListener('resize', () => { if (running) resize(); });
+    },
+    start() {
+      if (running || !host) return;
+      running = true;
+      resize();
+      setTimeout(() => { if (running && !particles.length) resize(); }, 120);   // layout may not be ready on the first frame
+      if (!reduceMotion) raf = requestAnimationFrame(loop);
+    },
+    stop() { running = false; cancelAnimationFrame(raf); }
+  };
+})();
+
+function hasPasswordProvider(user) {
+  return Boolean(user && (user.providerData || []).some((p) => p.providerId === 'password'));
 }
 
-function showAuthForm(mode) {
+function ensureAuthPageStyles() {
+  if (document.getElementById('auth-page-styles')) return;
+  const st = document.createElement('style');
+  st.id = 'auth-page-styles';
+  st.textContent = `
+    .auth-overlay.ap-overlay { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; justify-content: stretch; width: 100vw; height: 100vh; height: 100dvh; padding: 0; --bg: #07110d; --surface: #0b1510; --surface2: #10201a; --surface3: #17291f; --line: #1f3a2d; --line-soft: #173026; --text: #e9f3ee; --muted: #8aa89a; --faint: #587766; --lav: #3ddc97; color: var(--text); background: var(--bg); }
+    .auth-overlay.ap-overlay[hidden], .ap-overlay [hidden] { display: none !important; }
+    .ap-visual { position: relative; min-height: 0; overflow: hidden; background: #07110d; }
+    .ap-visual canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    .ap-panel { display: flex; min-height: 0; padding: 2rem; overflow-y: auto; background: var(--surface); border-left: 1px solid var(--line); }
+    .ap-inner { width: 100%; max-width: 380px; margin: auto; }
+    .ap-head { text-align: center; margin-bottom: 1.3rem; }
+    .ap-head .auth-kicker { margin-bottom: .45rem; }
+    .ap-head h1 { margin: 0 0 .35rem; font-size: 1.5rem; letter-spacing: -.02em; }
+    .ap-head p { margin: 0; color: var(--muted); font-size: .9rem; }
+    @media (min-width: 481px) { .ap-head p { white-space: nowrap; } }
+    .ap-tabs { display: flex; gap: .35rem; margin-bottom: 1.2rem; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); }
+    .ap-tab { flex: 1; padding: .5rem .4rem; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; transition: background .15s, color .15s; }
+    .ap-tab:hover { color: var(--text); }
+    .ap-tab.active { background: var(--surface3); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .3); }
+    .ap-view { display: grid; gap: .8rem; }
+    .ap-btn { display: inline-flex; align-items: center; justify-content: center; gap: .6rem; width: 100%; min-height: 44px; padding: 0 1.1rem; border-radius: 999px; border: 1px solid var(--line); background: var(--surface2); color: var(--text); font: inherit; font-size: .925rem; font-weight: 600; cursor: pointer; transition: border-color .15s, color .15s, transform .1s, filter .15s; }
+    .ap-btn:hover { border-color: var(--lav); color: var(--lav); }
+    .ap-btn:active { transform: scale(.98); }
+    .ap-btn:disabled { opacity: .6; cursor: default; }
+    .ap-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .ap-btn-primary { border-color: transparent; color: #06130d; background: linear-gradient(135deg, #84cc18, #10b981); box-shadow: 0 4px 20px rgba(16, 185, 129, .28); }
+    .ap-btn-primary:hover { color: #06130d; filter: brightness(1.08); }
+    .ap-btn-ghost { background: transparent; color: var(--muted); }
+    .ap-divider { display: flex; align-items: center; gap: .75rem; color: var(--muted); font-size: .8rem; }
+    .ap-divider::before, .ap-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    .ap-field { display: grid; gap: .35rem; }
+    .ap-field label { color: var(--muted); font-size: .8rem; font-weight: 600; }
+    .ap-label-row { display: flex; align-items: center; justify-content: space-between; }
+    .ap-link { padding: 0; border: 0; background: none; color: var(--lav); font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+    .ap-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+    .ap-input { width: 100%; height: 44px; padding: 0 1rem; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--text); font: inherit; font-size: .925rem; outline: none; transition: border-color .15s; }
+    .ap-input::placeholder { color: var(--faint); }
+    .ap-input:-webkit-autofill, .ap-input:-webkit-autofill:hover, .ap-input:-webkit-autofill:focus { -webkit-box-shadow: 0 0 0 1000px #07110d inset; -webkit-text-fill-color: #e9f3ee; caret-color: #e9f3ee; transition: background-color 9999s ease-in-out 0s; }
+    .ap-brand { display: flex; align-items: center; justify-content: center; gap: .55rem; }
+    .ap-brand-logo { width: 28px; height: 28px; border-radius: 8px; object-fit: cover; }
+    .ap-input:focus { border-color: var(--lav); }
+    .ap-switch { padding: .2rem 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: .85rem; text-align: center; cursor: pointer; }
+    .ap-switch span { color: var(--lav); font-weight: 700; }
+    .ap-note { padding: 1rem 1.1rem; border: 1px solid rgba(61, 220, 151, .28); border-radius: 14px; background: linear-gradient(100deg, var(--green-soft), var(--surface2) 75%); }
+    .ap-note-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .8rem; }
+    .ap-note-head i { color: var(--green); }
+    .ap-note-list { display: grid; gap: .75rem; margin: 0; padding: 0; list-style: none; }
+    .ap-note-list li { display: grid; grid-template-columns: 1.4rem 1fr; gap: .6rem; align-items: start; color: var(--muted); font-size: .85rem; line-height: 1.5; }
+    .ap-note-list i { margin-top: .2rem; color: var(--green); text-align: center; }
+    .ap-msg { min-height: 1.2rem; margin: .9rem 0 0; font-size: .85rem; text-align: center; }
+    .ap-msg.auth-error { color: var(--red); }
+    .ap-msg.ap-ok { color: var(--green); }
+    @media (max-width: 900px) { .auth-overlay.ap-overlay { grid-template-columns: 1fr; } .ap-visual { display: none; } .ap-panel { border-left: 0; padding: 1.5rem 1.2rem; } }
+  `;
+  document.head.appendChild(st);
+}
+
+function buildAuthPage() {
+  const old = document.getElementById('auth-overlay');
+  if (!old || old.dataset.authPage) return;
+  ensureAuthPageStyles();
+  const overlay = document.createElement('div');
+  overlay.id = 'auth-overlay';
+  overlay.className = 'auth-overlay ap-overlay';
+  overlay.dataset.authPage = '1';
+  overlay.hidden = old.hidden;
+  overlay.innerHTML = `
+    <div class="ap-visual" id="ap-visual"><canvas id="ap-canvas" aria-hidden="true"></canvas></div>
+    <div class="ap-panel">
+      <section class="ap-inner" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <div class="ap-head">
+          <span class="auth-kicker ap-brand"><img class="ap-brand-logo" id="ap-brand-logo" alt="" hidden><span>WELCOME TO INFINITE</span></span>
+          <h1 id="auth-title">We deserve better.</h1>
+          <p id="auth-description"></p>
+        </div>
+        <div class="ap-tabs" id="ap-tabs" role="tablist">
+          <button type="button" class="ap-tab" role="tab" data-auth-tab="signin">Sign in</button>
+          <button type="button" class="ap-tab" role="tab" data-auth-tab="signup">Sign up</button>
+          <button type="button" class="ap-tab" role="tab" data-auth-tab="guest">Guest</button>
+        </div>
+
+        <div class="ap-view" data-view="credentials">
+          <button type="button" class="ap-btn" id="auth-google">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+            Continue with Google
+          </button>
+          <div class="ap-divider">or</div>
+          <form id="auth-form" class="ap-view" novalidate>
+            <div class="ap-field" id="auth-name-field" hidden>
+              <label for="auth-name">Name</label>
+              <input class="ap-input" id="auth-name" name="name" type="text" autocomplete="name" placeholder="What should we call you?">
+            </div>
+            <div class="ap-field">
+              <label for="auth-email">Email</label>
+              <input class="ap-input" id="auth-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+            </div>
+            <div class="ap-field">
+              <div class="ap-label-row">
+                <label for="auth-password">Password</label>
+                <button type="button" class="ap-link" id="auth-forgot">Forgot password?</button>
+              </div>
+              <input class="ap-input" id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="ap-btn ap-btn-primary" id="auth-submit">Sign In</button>
+            <button type="button" class="ap-switch" id="auth-mode-toggle">Don't have an account? <span>Sign up</span></button>
+          </form>
+        </div>
+
+        <form class="ap-view" id="auth-reset-form" data-view="reset" novalidate hidden>
+          <div class="ap-field">
+            <label for="auth-reset-email">Email</label>
+            <input class="ap-input" id="auth-reset-email" type="email" autocomplete="email" placeholder="you@example.com" required>
+          </div>
+          <button type="submit" class="ap-btn ap-btn-primary" id="auth-reset-submit">Send reset link</button>
+          <button type="button" class="ap-btn ap-btn-ghost" id="auth-reset-back">Back to sign in</button>
+        </form>
+
+        <form class="ap-view" id="auth-guest-form" data-view="guest" novalidate hidden>
+          <div class="ap-note">
+            <div class="ap-note-head"><i class="fa-solid fa-user-lock"></i><strong>Guest mode</strong></div>
+            <ul class="ap-note-list">
+              <li><i class="fa-solid fa-hard-drive"></i><span>Your goals, notes and calendar are saved only in this browser, on this device.</span></li>
+              <li><i class="fa-solid fa-lock"></i><span>AI chat and Team features need an account. Sign in or create one to use them.</span></li>
+            </ul>
+          </div>
+          <div class="ap-field">
+            <label for="auth-guest-name">Name (optional)</label>
+            <input class="ap-input" id="auth-guest-name" type="text" autocomplete="name" placeholder="What should we call you?">
+          </div>
+          <button type="submit" class="ap-btn ap-btn-primary" id="auth-guest-confirm-btn">Got it, continue as guest</button>
+          <button type="button" class="ap-btn ap-btn-ghost" id="auth-guest-signup-btn">Sign up instead</button>
+        </form>
+
+        <p class="ap-msg auth-error" id="auth-error" role="alert"></p>
+        <p class="ap-msg ap-ok" id="auth-status" role="status" aria-live="polite"></p>
+      </section>
+    </div>`;
+  old.replaceWith(overlay);
+  const brandLogo = document.getElementById('ap-brand-logo');
+  const logoUrl = authLogoUrl();
+  if (brandLogo && logoUrl) {
+    brandLogo.onload = () => { brandLogo.hidden = false; };
+    brandLogo.onerror = () => { brandLogo.hidden = true; };
+    brandLogo.src = logoUrl;
+  }
+  AuthPixels.mount(document.getElementById('ap-canvas'), document.getElementById('ap-visual'));
+  showAuthTab(defaultAuthTab());
+}
+
+function setAuthStatus(message) {
+  const el = document.getElementById('auth-status');
+  if (el) el.textContent = message || '';
+}
+
+// tab: 'signin' | 'signup' | 'guest' | 'reset'
+function showAuthTab(tab) {
+  const overlay = document.getElementById('auth-overlay');
   const form = document.getElementById('auth-form');
-  const submit = document.getElementById('auth-submit');
-  const description = document.getElementById('auth-description');
-  const toggle = document.getElementById('auth-mode-toggle');
-  const nameField = document.getElementById('auth-name-field');
-  const nameInput = document.getElementById('auth-name');
-  if (!form) return;
-  hideAllAuthSteps();
-  form.hidden = false;
-  if (submit) submit.textContent = mode === 'signup' ? 'Create account' : 'Sign In';
-  form.dataset.mode = mode;
-  if (nameField) nameField.hidden = false;
-  if (nameInput) {
-    nameInput.required = mode === 'signup';
-    nameField?.querySelector('label')?.replaceChildren(
-      document.createTextNode(mode === 'signup' ? 'Name' : 'Name (optional)')
-    );
-  }
-  description.textContent = mode === 'signup'
-    ? 'Create an account to keep your progress across devices.'
-    : 'Welcome back. Your progress is waiting.';
-  if (toggle) {
-    toggle.innerHTML = mode === 'signup'
-      ? 'Already have an account? <span>Sign in</span>'
-      : "Don't have an account? <span>Sign up</span>";
-  }
-  setAuthError(firebaseConfigIsReady() ? '' : 'Add your Firebase web config in static/js/auth.js before using accounts.');
-  (mode === 'signup' ? nameInput : document.getElementById('auth-email'))?.focus();
-}
-
-function showGuestConfirm() {
-  if (!document.getElementById('auth-guest-confirm')) {
-    const name = window.prompt('What should we call you? (Optional)')?.trim() || '';
-    if (name) localStorage.setItem(LIFE_IS_SHORT_NAME_KEY, name);
-    localStorage.setItem(LIFE_IS_SHORT_MODE_KEY, 'guest');
-    setAccountActions(null);
-    updateSiteGreeting();
-    setAuthOverlayVisible(false);
-    return;
-  }
-  hideAllAuthSteps();
-  document.getElementById('auth-guest-confirm').hidden = false;
-  document.getElementById('auth-description').textContent = 'One more thing before you continue as a guest.';
-}
-
-function showAuthChoices() {
-  hideAllAuthSteps();
-  document.getElementById('auth-choice-buttons')?.removeAttribute('hidden');
-  const description = document.getElementById('auth-description');
-  if (description) description.textContent = 'Sign in to keep your progress with you, or continue locally as a guest.';
+  if (!overlay || !form) return;
+  const view = tab === 'reset' ? 'reset' : tab === 'guest' ? 'guest' : 'credentials';
+  overlay.querySelectorAll('[data-auth-tab]').forEach((b) => {
+    const on = b.dataset.authTab === tab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  document.getElementById('ap-tabs').hidden = tab === 'reset';
+  overlay.querySelectorAll('[data-view]').forEach((v) => { v.hidden = v.dataset.view !== view; });
   setAuthError('');
+  setAuthStatus('');
+
+  const signup = tab === 'signup';
+  form.dataset.mode = signup ? 'signup' : 'signin';
+  document.getElementById('auth-name-field').hidden = !signup;
+  document.getElementById('auth-name').required = signup;
+  document.getElementById('auth-forgot').hidden = signup;
+  document.getElementById('auth-submit').textContent = signup ? 'Create account' : 'Sign In';
+  document.getElementById('auth-password').autocomplete = signup ? 'new-password' : 'current-password';
+  document.getElementById('auth-mode-toggle').innerHTML = signup
+    ? 'Already have an account? <span>Sign in</span>'
+    : "Don't have an account? <span>Sign up</span>";
+  document.getElementById('auth-description').textContent = {
+    signin: 'Welcome back. Your progress is waiting.',
+    signup: 'Create an account to sync your progress.',
+    guest: 'Try Infinite without an account.',
+    reset: "We'll email you a link to reset your password."
+  }[tab];
+  if (!firebaseConfigIsReady()) setAuthError('Add your Firebase web config in static/js/auth.js before using accounts.');
+
+  const focusId = { signin: 'auth-email', signup: 'auth-name', guest: 'auth-guest-name', reset: 'auth-reset-email' }[tab];
+  if (!overlay.hidden) document.getElementById(focusId)?.focus();
 }
+
+// Older names still used elsewhere in this file.
+function showAuthForm(mode) { showAuthTab(mode === 'signup' ? 'signup' : 'signin'); }
+function defaultAuthTab() {
+  try { return localStorage.getItem('infinite_returning') ? 'signin' : 'signup'; } catch (e) { return 'signup'; }
+}
+function showAuthChoices() { showAuthTab(defaultAuthTab()); }
+function showGuestConfirm() { showAuthTab('guest'); }
 
 async function loadFirestoreData(user) {
   const snapshot = await lifeIsShortDb.collection('users').doc(user.uid).get();
@@ -307,6 +588,8 @@ function startFirebase() {
   // Expose to other pages/scripts (e.g. the Team feature) that load after auth.js.
   window.lifeIsShortAuth = lifeIsShortAuth;
   window.lifeIsShortDb = lifeIsShortDb;
+  lifeIsShortAuth.requireSignIn = () => { setAuthOverlayVisible(true); showAuthTab('signin'); };
+  lifeIsShortAuth.getRedirectResult().catch((error) => setAuthError(readableAuthError(error)));
   lifeIsShortAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
     console.warn('Unable to keep the account signed in', error);
   });
@@ -314,6 +597,8 @@ function startFirebase() {
     if (user) {
       lifeIsShortUser = user;
       window.lifeIsShortUser = user;
+      try { localStorage.setItem('infinite_returning', '1'); } catch (e) { /* ignore */ }
+      setAuthOverlayVisible(false);   // signed in: never show the auth page
       localStorage.setItem(LIFE_IS_SHORT_MODE_KEY, 'account');
       if (user.displayName) localStorage.setItem(LIFE_IS_SHORT_NAME_KEY, user.displayName);
       updateSiteGreeting();
@@ -338,6 +623,8 @@ function startFirebase() {
     const hasGuestMode = localStorage.getItem(LIFE_IS_SHORT_MODE_KEY) === 'guest';
     if (!hasGuestMode) {
       localStorage.removeItem(LIFE_IS_SHORT_NAME_KEY);
+      const pw = document.getElementById('auth-password');
+      if (pw) pw.value = '';
       showAuthChoices();
     }
     updateSiteGreeting();
@@ -345,6 +632,56 @@ function startFirebase() {
     document.dispatchEvent(new CustomEvent('lifeIsShortAuthState', { detail: { user: null } }));
   });
   return true;
+}
+
+async function signInWithGoogle() {
+  setAuthError('');
+  setAuthStatus('');
+  if (!lifeIsShortAuth) {
+    setAuthError('Account sign-in is unavailable until Firebase is configured.');
+    return;
+  }
+  const button = document.getElementById('auth-google');
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  button.disabled = true;
+  try {
+    await lifeIsShortAuth.signInWithPopup(provider);
+  } catch (error) {
+    if (error.code === 'auth/popup-blocked' || error.code === 'auth/operation-not-supported-in-this-environment') {
+      try { await lifeIsShortAuth.signInWithRedirect(provider); return; } catch (redirectError) { error = redirectError; }
+    }
+    if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request') {
+      setAuthError(readableAuthError(error));
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function sendPasswordReset(event) {
+  event.preventDefault();
+  setAuthError('');
+  setAuthStatus('');
+  if (!lifeIsShortAuth) {
+    setAuthError('Account sign-in is unavailable until Firebase is configured.');
+    return;
+  }
+  const email = document.getElementById('auth-reset-email').value.trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    setAuthError('Enter a valid email address.');
+    return;
+  }
+  const submit = document.getElementById('auth-reset-submit');
+  submit.disabled = true;
+  try {
+    await lifeIsShortAuth.sendPasswordResetEmail(email);
+    setAuthStatus('Reset link sent. Check your inbox (and spam folder).');
+  } catch (error) {
+    setAuthError(readableAuthError(error));
+  } finally {
+    submit.disabled = false;
+  }
 }
 
 function startGuestMode() {
@@ -361,37 +698,37 @@ function setupAuthUi() {
   setupPasswordForm();
   document.addEventListener('lifeIsShortRequireSignIn', () => {
     if (!document.getElementById('auth-overlay')) return;
-    showAuthForm('signin');
     setAuthOverlayVisible(true);
+    showAuthTab('signin');
   });
   document.getElementById('guest-mode-signin')?.addEventListener('click', () => {
-    showAuthForm('signin');
     setAuthOverlayVisible(true);
+    showAuthTab('signin');
   });
-  document.querySelectorAll('[data-auth-choice]').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (button.dataset.authChoice === 'guest') {
-        showGuestConfirm();
-      } else {
-        showAuthForm(button.dataset.authChoice);
-      }
-    });
+  document.querySelectorAll('[data-auth-tab]').forEach((button) => {
+    button.addEventListener('click', () => showAuthTab(button.dataset.authTab));
   });
-
-  document.getElementById('auth-back')?.addEventListener('click', showAuthChoices);
-  document.getElementById('auth-guest-back')?.addEventListener('click', showAuthChoices);
-  document.getElementById('auth-guest-confirm-btn')?.addEventListener('click', startGuestMode);
-  document.getElementById('auth-guest-signup-btn')?.addEventListener('click', () => showAuthForm('signup'));
-
   document.getElementById('auth-mode-toggle')?.addEventListener('click', () => {
-    const form = document.getElementById('auth-form');
-    const nextMode = form.dataset.mode === 'signup' ? 'signin' : 'signup';
-    showAuthForm(nextMode);
+    showAuthTab(document.getElementById('auth-form').dataset.mode === 'signup' ? 'signin' : 'signup');
   });
+  document.getElementById('auth-forgot')?.addEventListener('click', () => {
+    const typed = document.getElementById('auth-email').value.trim();
+    showAuthTab('reset');
+    if (typed) document.getElementById('auth-reset-email').value = typed;
+  });
+  document.getElementById('auth-reset-back')?.addEventListener('click', () => showAuthTab('signin'));
+  document.getElementById('auth-reset-form')?.addEventListener('submit', sendPasswordReset);
+  document.getElementById('auth-google')?.addEventListener('click', signInWithGoogle);
+  document.getElementById('auth-guest-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    startGuestMode();
+  });
+  document.getElementById('auth-guest-signup-btn')?.addEventListener('click', () => showAuthTab('signup'));
 
   document.getElementById('auth-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     setAuthError('');
+    setAuthStatus('');
     if (!lifeIsShortAuth) {
       setAuthError('Account sign-in is unavailable until Firebase is configured.');
       return;
@@ -422,14 +759,11 @@ function setupAuthUi() {
         updateSiteGreeting();
         showPasswordReminder();
       } else {
-        const credential = await lifeIsShortAuth.signInWithEmailAndPassword(email, password);
-        if (name) {
-          await credential.user.updateProfile({ displayName: name });
-          localStorage.setItem(LIFE_IS_SHORT_NAME_KEY, name);
-        }
+        await lifeIsShortAuth.signInWithEmailAndPassword(email, password);
       }
     } catch (error) {
       setAuthError(readableAuthError(error));
+    } finally {
       submit.disabled = false;
     }
   });
@@ -873,7 +1207,7 @@ function openProfileDialog() {
   const email = document.getElementById('profile-email');
   email.textContent = user ? user.email : '';
   email.hidden = !user;
-  document.getElementById('profile-password-section').hidden = !user;
+  document.getElementById('profile-password-section').hidden = !hasPasswordProvider(user);
   document.getElementById('profile-guest-note').hidden = !!user;
   dialog._showForm();
   dialog._refreshPreview();
@@ -903,6 +1237,7 @@ function setupProfileUi() {
 
 function initializeLifeIsShortAuth() {
   setupLifeIsShortStorageSync();
+  buildAuthPage();
   setupAuthUi();
   setupProfileUi();
   updateSiteGreeting();
