@@ -9,16 +9,25 @@
  *     -> 200 { "reply": "markdown", "proposed": [{name, args}, ...] }
  *     -> 401 not signed in · 429 daily cap or upstream rate limit
  *
+ *   POST /verify-turnstile
+ *   { "token": "<turnstile token>" }
+ *     -> 200 { "success": true } | 400 { "success": false, "error": "..." }
+ *   No Authorization header: this runs before sign-in, that is the whole point. The
+ *   origin list below is the gate instead, plus a per-IP cap so this cannot be used as
+ *   a free oracle for guessing tokens.
+ *
  * The user is verified with the public Firebase Web API, and their data is sent by the
  * browser (it already holds it in localStorage), so no service account ever lives here.
  * Nothing is written back: the browser shows a confirm card and applies the change locally.
  *
  * Secrets:  HF_TOKEN (wrangler secret put HF_TOKEN)
+ *           TURNSTILE_SECRET (wrangler secret put TURNSTILE_SECRET)
  * Vars:     FIREBASE_API_KEY, HF_MODEL (optional), DAILY_LIMIT, ALLOWED_ORIGINS
  */
 
 const HF_ENDPOINT = 'https://router.huggingface.co/v1/chat/completions';
 const IDENTITY_TOOLKIT = 'https://identitytoolkit.googleapis.com/v1/accounts:lookup';
+const TURNSTILE_VERIFY = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 /* Free-tier models on the HF router, tried in order. A provider can drop a model at any
    time, and "model_not_supported" is a 400 the caller never needs to see. */
 const DEFAULT_MODELS = ['Qwen/Qwen3-4B-Instruct-2507', 'meta-llama/Llama-3.1-8B-Instruct', 'google/gemma-3-4b-it'];
@@ -35,11 +44,17 @@ const MAX_HISTORY = 20;
 const MAX_MESSAGE_CHARS = 2000;
 const MAX_PROPOSALS = 6;
 const MAX_TOKENS = 900;
+/* A Turnstile token is a few hundred characters; anything longer is not one. */
+const MAX_TOKEN_CHARS = 2048;
+/* Captcha checks per IP per minute. Generous for a person retrying, tight for a farm. */
+const TURNSTILE_PER_IP_PER_MINUTE = 20;
 const YT_RE = /(?:youtube\.com\/(?:watch\?[^#]*v=|shorts\/|embed\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/;
 
 /* Daily caps, per isolate. Best effort: an isolate can be recycled, so this is a guard rail
    rather than an accounting ledger. The free tier rate limit is the real ceiling. */
 const usage = new Map();
+/* Captcha attempts per IP, so this endpoint cannot be used as a free oracle. */
+const captchaAttempts = new Map();
 
 class HttpError extends Error {
   constructor(status, detail) {
@@ -97,6 +112,75 @@ function checkAndCount(uid, limit) {
   if (used >= limit) throw new HttpError(429, `Daily limit of ${limit} AI messages reached. It resets at midnight UTC.`);
   usage.set(key, used + 1);
   if (usage.size > 5000) usage.clear();               // keep the isolate's memory bounded
+}
+
+/* ---------------- captcha ---------------- */
+/* Reject a call from a page that is not ours. respond() already sets the CORS header from
+   this same list; this is the check that stops the request in the first place. */
+function requireOwnOrigin(request, env) {
+  const origin = request.headers.get('origin') || '';
+  if (origin && !origins(env).includes(origin)) {
+    throw new HttpError(403, 'This site is not allowed to use this endpoint.');
+  }
+}
+
+function allowCaptchaAttempt(request, env) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const minute = Math.floor(Date.now() / 60000);
+  const key = `${ip}_${minute}`;
+  const used = captchaAttempts.get(key) || 0;
+  if (used >= TURNSTILE_PER_IP_PER_MINUTE) {
+    throw new HttpError(429, 'Too many captcha attempts. Wait a minute and try again.');
+  }
+  captchaAttempts.set(key, used + 1);
+  if (captchaAttempts.size > 5000) captchaAttempts.clear();
+}
+
+async function verifyTurnstile(request, env) {
+  requireOwnOrigin(request, env);
+  allowCaptchaAttempt(request, env);
+  if (!env.TURNSTILE_SECRET) {
+    throw new HttpError(500, 'The captcha is not set up on this site yet.');
+  }
+
+  let token = '';
+  try {
+    const body = await request.json();
+    token = String((body && body.token) || '').trim();
+  } catch (e) {
+    return respond(request, env, { success: false, error: 'Invalid request.' }, 400);
+  }
+  if (!token) throw new HttpError(400, 'Finish the captcha first.');
+  if (token.length > MAX_TOKEN_CHARS) throw new HttpError(400, 'That captcha token is not valid.');
+
+  /* remoteip is optional; sending it lets Cloudflare weigh the IP as well as the token. */
+  const payload = { secret: env.TURNSTILE_SECRET, response: token };
+  const ip = request.headers.get('cf-connecting-ip');
+  if (ip) payload.remoteip = ip;
+
+  let result;
+  try {
+    const res = await fetch(TURNSTILE_VERIFY, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
+    });
+    result = await res.json();
+  } catch (e) {
+    // Fail closed: if we cannot ask Cloudflare, nobody gets through this door.
+    throw new HttpError(502, 'The captcha could not be checked. Try again in a moment.');
+  }
+
+  if (!result || result.success !== true) {
+    const codes = Array.isArray(result?.['error-codes']) ? result['error-codes'] : [];
+    // Turnstile reuses one token per solve; the client must reset the widget each time.
+    const message = codes.includes('timeout-or-duplicate')
+      ? 'That captcha expired. Try it again.'
+      : 'The captcha could not be verified.';
+    return respond(request, env, { success: false, error: message }, 400);
+  }
+  return respond(request, env, { success: true });
 }
 
 /* ---------------- input ---------------- */
@@ -309,6 +393,7 @@ export default {
           model: env.HF_MODEL || DEFAULT_MODEL,
           hasToken: !!env.HF_TOKEN,
           hasFirebaseKey: !!env.FIREBASE_API_KEY,
+          hasTurnstile: !!env.TURNSTILE_SECRET,
         });
       }
 
@@ -320,9 +405,21 @@ export default {
           endpoints: {
             health: '/health',
             chat: 'POST /chat  (Authorization: Bearer <Firebase ID token>)',
+            verify: 'POST /verify-turnstile  ({ token })',
           },
-          configured: { hasToken: !!env.HF_TOKEN, hasFirebaseKey: !!env.FIREBASE_API_KEY },
+          configured: {
+            hasToken: !!env.HF_TOKEN,
+            hasFirebaseKey: !!env.FIREBASE_API_KEY,
+            hasTurnstile: !!env.TURNSTILE_SECRET,
+          },
         });
+      }
+
+      // The captcha check runs before anyone is signed in, so it takes no token: the
+      // origin list and a per-IP cap stand in its place.
+      if (url.pathname === '/verify-turnstile') {
+        if (request.method !== 'POST') return respond(request, env, { error: 'Use POST' }, 405);
+        return await verifyTurnstile(request, env);
       }
 
       if (url.pathname !== '/chat') return respond(request, env, { error: 'Not found' }, 404);

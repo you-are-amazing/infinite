@@ -5,6 +5,9 @@ plan. It replaces `functions/index.js` (which needs the Blaze plan). A Hugging F
 the first home for this backend, but Docker Spaces on the free CPU tier now require a PRO
 subscription.
 
+It also hosts the site's **Turnstile check** (`POST /verify-turnstile`), so the captcha on the
+sign-in, sign-up and reset forms is verified with a secret key that never reaches a browser.
+
 `src/index.js` keeps the same request and response shape as the Cloud Function, so the
 frontend only changes one URL.
 
@@ -19,6 +22,20 @@ Authorization: Bearer <Firebase ID token>
 200 { "reply": "markdown", "proposed": [{ "name": "propose_goal", "args": { ... } }] }
 401 not signed in   ·   429 daily cap or the free inference endpoint is busy
 ```
+
+```
+POST https://infinite-ai.<you>.workers.dev/verify-turnstile
+
+{ "token": "<turnstile token from the browser>" }
+
+200 { "success": true }
+400 { "success": false, "error": "That captcha expired. Try it again." }
+403 a page that is not in ALLOWED_ORIGINS   ·   429 too many attempts from this IP
+```
+
+No `Authorization` header here: this runs *before* sign-in, which is the point. The
+`ALLOWED_ORIGINS` list and a per-IP cap guard it instead, and it fails **closed** — if
+Cloudflare cannot be reached, the request fails rather than passing.
 
 ## One-time setup
 
@@ -37,13 +54,19 @@ Authorization: Bearer <Firebase ID token>
    ```bash
    cd ai-worker && npx wrangler secret put HF_TOKEN
    ```
-4. Deploy:
+4. Add the Turnstile secret key, if you use the captcha (create a widget at
+   <https://dash.cloudflare.com/?to=/:account/turnstile>):
+   ```bash
+   cd ai-worker && npx wrangler secret put TURNSTILE_SECRET
+   ```
+   The matching **site key** is public and goes in `static/js/auth.js` as `TURNSTILE_SITE_KEY`.
+5. Deploy:
    ```bash
    cd ai-worker && npx wrangler deploy
    ```
-5. Check it: `curl https://infinite-ai.<you>.workers.dev/health` should show
-   `"hasToken": true` and `"hasFirebaseKey": true`.
-6. Point the frontend at it in `ai/index.html`:
+6. Check it: `curl https://infinite-ai.<you>.workers.dev/health` should show
+   `"hasToken": true`, `"hasFirebaseKey": true` and `"hasTurnstile": true`.
+7. Point the frontend at it in `ai/index.html`:
    ```js
    var AI_ENDPOINT = 'https://infinite-ai.<you>.workers.dev';
    ```
@@ -54,6 +77,7 @@ Authorization: Bearer <Firebase ID token>
 | Name | Kind | Default | What it does |
 | --- | --- | --- | --- |
 | `HF_TOKEN` | secret (`npx wrangler secret put HF_TOKEN`) | — | Token from <https://huggingface.co/settings/tokens>. Required. |
+| `TURNSTILE_SECRET` | secret (`npx wrangler secret put TURNSTILE_SECRET`) | — | Turnstile secret key. Required for `/verify-turnstile`; the browser only ever gets the site key. |
 | `FIREBASE_API_KEY` | var | — | Your Firebase Web API key. Public, and used only to verify the caller's ID token. |
 | `HF_MODEL` | var | `Qwen/Qwen3-4B-Instruct-2507` | Any chat model the HF router serves on a free provider. If a provider withdraws it, the Worker falls back to the next model in its built-in list. |
 | `DAILY_LIMIT` | var | `40` | Messages per user per UTC day. |
@@ -68,6 +92,9 @@ Authorization: Bearer <Firebase ID token>
 - Never writes to Firestore. The browser shows a confirm card and applies the change to
   localStorage, so your existing sync carries it, exactly as with the Cloud Function.
 - CORS is limited to the origins in `ALLOWED_ORIGINS`.
+- Checks Turnstile tokens for the auth forms, so a bot cannot reach Firebase's sign-up or
+  password-reset endpoints by skipping your page. The secret key stays here; the browser only
+  ever holds the site key.
 
 ## Limits worth knowing
 

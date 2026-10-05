@@ -20,7 +20,9 @@ Live site: https://you-are-amazing.github.io/infinite/
   account that owns the site, and only after a key you set.
 - **Infinite AI**: a coaching companion that reads your goals, notes and saved links, and can *propose* changes to
   them. Nothing is ever written without your confirmation.
-- **Accounts and cloud sync**: email login with Firebase, or use it as a guest without an account.
+- **Accounts and cloud sync**: email login with Firebase, or use it as a guest without an account. Sign-in, sign-up
+  and password reset sit behind a Cloudflare Turnstile captcha, checked by the Worker — see
+  [Captcha setup](#captcha-setup).
 - **Light and dark mode**, responsive on desktop and mobile.
 
 ## Tech
@@ -412,6 +414,46 @@ The feed is a static file (`static/data/news.json`) refreshed every 6 hours by a
 
 Stories come from public RSS feeds. Songs are 30-second previews from the iTunes Search API. Everything used is free.
 
+## Captcha setup
+
+Sign-in, sign-up and password reset are behind [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/),
+the free captcha. Two keys, and they never sit in the same place:
+
+| Key | Where it lives | Why |
+| --- | --- | --- |
+| **site key** | `TURNSTILE_SITE_KEY` in `static/js/auth.js` | public by design: the browser must render the widget |
+| **secret key** | the Worker, as `TURNSTILE_SECRET` | never sent anywhere near a browser |
+
+1. In the Cloudflare dashboard open **Turnstile**, add a widget in **Managed** mode, and list your hostnames
+   (`<username>.github.io`, plus `localhost` if you test locally).
+2. Put the site key in `static/js/auth.js`, then store the secret key on the Worker:
+
+   ```bash
+   cd ai-worker
+   npx wrangler secret put TURNSTILE_SECRET
+   npx wrangler deploy
+   ```
+
+The browser never decides whether a person is real. It hands the token to `POST /verify-turnstile` on the AI Worker,
+and the Worker asks Cloudflare with the secret key. So editing the page, or calling Firebase directly from a script,
+still gets nowhere. That route needs no Firebase token — it runs *before* sign-in — so it is guarded by the same
+`ALLOWED_ORIGINS` list plus a per-IP cap, and it fails **closed**: if Cloudflare cannot be reached, nobody gets in.
+
+Three details worth keeping if you edit this:
+
+- A Turnstile token is good **once**. The widget is reset after every attempt, so a failed password cannot be replayed.
+- The **Google** button skips the captcha on purpose: Google already checks for bots, and a second challenge in front
+  of a one-click sign-in is a wall, not a door.
+- **Guest mode** skips it too — no account is created, so there is nothing to burn.
+
+This is the first half of bot defence only. For the second half, register the web app under **Firebase > App Check**
+and enforce it on Authentication: otherwise a bot can skip your page entirely and call Firebase's API directly.
+Turn on **email enumeration protection** in Authentication > Settings at the same time, so a wrong password cannot be
+told apart from an address that has no account.
+
+Cloudflare's test keys (`1x00000000000000000000AA` always passes, `2x00000000000000000000AB` always fails) are useful
+on localhost. The site ships with the real key, so check it on the live site — a test key would let every bot through.
+
 ## Project structure
 
 ```
@@ -446,6 +488,7 @@ Kept out on purpose, so a fork cannot walk into the live project:
 | --- | --- |
 | the admin email address | in `firestore.rules.deploy` (gitignored) and, unavoidably, in the site's JavaScript |
 | `HF_TOKEN` (AI provider) | `npx wrangler secret put HF_TOKEN` — a Worker secret |
+| `TURNSTILE_SECRET` (captcha) | `npx wrangler secret put TURNSTILE_SECRET` — a Worker secret |
 | `GEMINI_API_KEY` | a GitHub Actions secret, for the feed only |
 | `ai-worker/wrangler.toml` | gitignored; `wrangler.example.toml` shows the shape |
 | the deployed Worker URL | set in `ai/index.html` for your own deployment |

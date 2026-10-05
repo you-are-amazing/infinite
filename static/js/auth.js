@@ -94,7 +94,15 @@ function setAuthOverlayVisible(isVisible) {
   if (!overlay) return;
   overlay.hidden = !isVisible;
   document.body.classList.toggle('auth-lock', isVisible);
-  if (isVisible) AuthPixels.start(); else AuthPixels.stop();
+  if (isVisible) {
+    AuthPixels.start();
+    // Load the captcha only once somebody is actually looking at the sign-in page,
+    // so a signed-in visitor never pays for the script.
+    Turnstile.mount('auth-turnstile-main');
+    Turnstile.mount('auth-turnstile-reset');
+  } else {
+    AuthPixels.stop();
+  }
 }
 
 function updateSiteGreeting() {
@@ -367,6 +375,123 @@ function hasPasswordProvider(user) {
   return Boolean(user && (user.providerData || []).some((p) => p.providerId === 'password'));
 }
 
+/* ------------------------------------------------------------------
+ * Cloudflare Turnstile — the captcha on the sign-in, sign-up and reset forms.
+ *
+ * The browser never decides anything: it hands the token to the Worker, and the
+ * Worker asks Cloudflare with the secret key it keeps. So editing the page, or
+ * calling Firebase directly, still gets you nowhere.
+ * ------------------------------------------------------------------ */
+const TURNSTILE_SITE_KEY = '0x4AAAAAAFOHl2sSauip7Jns';
+/* Same Worker that serves /chat (see ai/index.html). It holds TURNSTILE_SECRET. */
+const AI_WORKER_BASE = 'https://infinite-ai.darshan-infinite-ai.workers.dev';
+const TURNSTILE_SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+
+const Turnstile = (() => {
+  const widgets = new Map();          // container id -> widgetId
+  const tokens = new Map();           // container id -> token
+  let loading = null;
+  let broken = false;
+
+  function load() {
+    if (window.turnstile) return Promise.resolve(window.turnstile);
+    if (loading) return loading;
+    loading = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = TURNSTILE_SCRIPT;
+      script.async = true;
+      script.defer = true;
+      script.onload = () => (window.turnstile ? resolve(window.turnstile) : reject(new Error('no turnstile')));
+      script.onerror = () => reject(new Error('turnstile script blocked'));
+      document.head.appendChild(script);
+    }).catch((error) => { loading = null; broken = true; throw error; });
+    return loading;
+  }
+
+  /* Render into one container. Called again after the page is rebuilt, and safe to
+     call twice for the same container: the old widget is removed first. */
+  async function mount(containerId) {
+    const host = document.getElementById(containerId);
+    if (!host || widgets.has(containerId)) return;
+    try {
+      const api = await load();
+      if (!document.getElementById(containerId)) return;      // page changed while loading
+      const widgetId = api.render(host, {
+        sitekey: TURNSTILE_SITE_KEY,
+        theme: 'dark',
+        size: 'flexible',
+        callback: (token) => tokens.set(containerId, token),
+        'expired-callback': () => tokens.delete(containerId),
+        'error-callback': () => tokens.delete(containerId),
+      });
+      if (widgetId) widgets.set(containerId, widgetId);
+    } catch (error) {
+      showCaptchaProblem(containerId);
+    }
+  }
+
+  function showCaptchaProblem(containerId) {
+    const host = document.getElementById(containerId);
+    if (!host) return;
+    host.replaceChildren();
+    const note = document.createElement('span');
+    note.className = 'ap-turnstile-error';
+    note.textContent = 'The captcha could not load. Check your connection, then reload this page.';
+    host.appendChild(note);
+  }
+
+  /* A token is good once. Clear it after every attempt, solved or not. */
+  function reset(containerId) {
+    const widgetId = widgets.get(containerId);
+    tokens.delete(containerId);
+    if (!widgetId || !window.turnstile) return;
+    try { window.turnstile.reset(widgetId); } catch (e) { /* the widget is gone; nothing to clear */ }
+  }
+
+  function tokenFor(containerId) {
+    return tokens.get(containerId) || '';
+  }
+
+  async function verify(token) {
+    const res = await fetch(`${AI_WORKER_BASE}/verify-turnstile`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* the Worker sent nothing readable */ }
+    return { ok: res.ok && data.success === true, error: data.error || '' };
+  }
+
+  return { mount, reset, tokenFor, verify, isBroken: () => broken };
+})();
+
+/* Called from a form submit. Returns true when the person may carry on to Firebase. */
+async function passCaptcha(containerId) {
+  if (!TURNSTILE_SITE_KEY) return true;                    // no widget configured: nothing to check
+  const token = Turnstile.tokenFor(containerId);
+  if (!token) {
+    setAuthError(Turnstile.isBroken()
+      ? 'The captcha could not load. Check your connection, then reload this page.'
+      : 'Finish the captcha first.');
+    return false;
+  }
+  let verdict;
+  try {
+    verdict = await Turnstile.verify(token);
+  } catch (error) {
+    setAuthError('The captcha could not be checked. Check your connection and try again.');
+    Turnstile.reset(containerId);
+    return false;
+  }
+  Turnstile.reset(containerId);                            // one token, one try
+  if (!verdict.ok) {
+    setAuthError(verdict.error || 'The captcha could not be verified. Try again.');
+    return false;
+  }
+  return true;
+}
+
 function ensureAuthPageStyles() {
   if (document.getElementById('auth-page-styles')) return;
   const st = document.createElement('style');
@@ -409,6 +534,10 @@ function ensureAuthPageStyles() {
     .ap-brand { display: flex; align-items: center; justify-content: center; gap: .55rem; }
     .ap-brand-logo { width: 28px; height: 28px; border-radius: 8px; object-fit: cover; }
     .ap-input:focus { border-color: var(--lav); }
+    .ap-turnstile { display: flex; justify-content: center; min-height: 65px; }
+    .ap-turnstile:empty { display: none; }
+    .ap-turnstile iframe { max-width: 100%; }
+    .ap-turnstile-error { color: #ff8f8f; font-size: .8rem; text-align: center; }
     .ap-switch { padding: .2rem 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: .85rem; text-align: center; cursor: pointer; }
     .ap-switch span { color: var(--lav); font-weight: 700; }
     .ap-note { padding: 1rem 1.1rem; border: 1px solid rgba(61, 220, 151, .28); border-radius: 14px; background: linear-gradient(100deg, var(--green-soft), var(--surface2) 75%); }
@@ -471,6 +600,7 @@ function buildAuthPage() {
               </div>
               <input class="ap-input" id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" placeholder="••••••••" required>
             </div>
+            <div class="ap-turnstile" id="auth-turnstile-main"></div>
             <button type="submit" class="ap-btn ap-btn-primary" id="auth-submit">Sign In</button>
             <button type="button" class="ap-switch" id="auth-mode-toggle">Don't have an account? <span>Sign up</span></button>
           </form>
@@ -481,6 +611,7 @@ function buildAuthPage() {
             <label for="auth-reset-email">Email</label>
             <input class="ap-input" id="auth-reset-email" type="email" autocomplete="email" placeholder="you@example.com" required>
           </div>
+          <div class="ap-turnstile" id="auth-turnstile-reset"></div>
           <button type="submit" class="ap-btn ap-btn-primary" id="auth-reset-submit">Send reset link</button>
           <button type="button" class="ap-btn ap-btn-ghost" id="auth-reset-back">Back to sign in</button>
         </form>
@@ -675,6 +806,9 @@ async function sendPasswordReset(event) {
   const submit = document.getElementById('auth-reset-submit');
   submit.disabled = true;
   try {
+    // The captcha first: nobody should learn whether an address has an account by
+    // asking this form for a reset mail.
+    if (!(await passCaptcha('auth-turnstile-reset'))) return;
     await lifeIsShortAuth.sendPasswordResetEmail(email);
     setAuthStatus('Reset link sent. Check your inbox (and spam folder).');
   } catch (error) {
@@ -752,6 +886,9 @@ function setupAuthUi() {
     const submit = document.getElementById('auth-submit');
     submit.disabled = true;
     try {
+      // Sign in, sign up and password reset all sit behind this one check, so a bot
+      // cannot burn the Firebase sign-up quota from a script.
+      if (!(await passCaptcha('auth-turnstile-main'))) return;
       if (mode === 'signup') {
         const credential = await lifeIsShortAuth.createUserWithEmailAndPassword(email, password);
         await credential.user.updateProfile({ displayName: name });

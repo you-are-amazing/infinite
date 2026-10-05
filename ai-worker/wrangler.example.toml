@@ -26,6 +26,8 @@ ALLOWED_ORIGINS = "https://<username>.github.io,http://127.0.0.1:5500,http://loc
 
 # HF_TOKEN is a secret, never a var:
 #   npx wrangler secret put HF_TOKEN
+# TURNSTILE_SECRET is a secret too, for POST /verify-turnstile:
+#   npx wrangler secret put TURNSTILE_SECRET
 
 [observability]
 enabled = true
