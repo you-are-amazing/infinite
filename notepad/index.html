@@ -94,6 +94,7 @@
             <button type="button" class="td-reload" id="td-reload" hidden>Someone edited -- load latest</button>
             <span class="td-status" id="td-status"></span>
           </div>
+          <nav class="np-crumbs" id="note-crumbs" aria-label="Note path" hidden></nav>
           <input id="note-title" type="text" maxlength="120" placeholder="Untitled note" aria-label="Note title">
           <div id="note-date"></div>
           <div class="np-tools" role="toolbar" aria-label="Text formatting">
@@ -103,6 +104,7 @@
             <button type="button" data-command="insertUnorderedList" aria-label="Bulleted list">&bull;</button>
             <button type="button" data-command="formatBlock" data-value="blockquote" aria-label="Quote">&ldquo;</button>
             <button type="button" id="highlight-btn" aria-label="Highlight" style="width:auto; padding:0 12px;">Highlight</button>
+            <button type="button" id="add-subnote-btn" aria-label="Add subnote" style="width:auto; padding:0 12px;"><i class="fa-solid fa-plus" style="margin-right:6px;"></i>Subnote</button>
             <button type="button" id="share-team-btn" aria-label="Share with team" style="width:auto; padding:0 12px; margin-left:auto;" hidden><i class="fa-solid fa-share-nodes" style="margin-right:6px;"></i>Share with team</button>
           </div>
           <article id="note-body" contenteditable="false" role="textbox" aria-label="Note body"></article>
@@ -209,6 +211,9 @@
       let appliedStamps = {};            // teamId + '/' + docId -> ms of the newest version already pulled into the note
       let bannerNoteId = null;           // note the "teammate changed this" banner is currently showing
 
+      const MAX_DEPTH = 5;            // top level = 0, so 6 levels in total
+      let animateId = null;           // only animate the list that was just expanded
+
       function tickClock() {
         const n = new Date();
         $('utc-clock').textContent =
@@ -279,21 +284,83 @@
         } catch (error) { return []; }
       }
 
-      function normalizeNote(n) {
-        return {
-          id: n && n.id ? n.id : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          title: (n && typeof n.title === 'string') ? n.title : '',
-          body: (n && typeof n.body === 'string') ? n.body : '',
-          updatedAt: (n && n.updatedAt) ? n.updatedAt : new Date().toISOString(),
-          teamInfo: (n && typeof n.teamInfo === 'string') ? n.teamInfo : null,
-          teamBy: (n && typeof n.teamBy === 'string') ? n.teamBy : null,
-          teamSyncAt: (n && n.teamSyncAt) ? n.teamSyncAt : 0,
-          children: Array.isArray(n.children) ? n.children.map(normalizeNote) : [],
-          expanded: n.expanded !== false
-        };
-      }
+function normalizeNote(n) {
+  n = n || {};
+  return {
+    id: n.id ? n.id : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    title: typeof n.title === 'string' ? n.title : '',
+    body: typeof n.body === 'string' ? n.body : '',
+    updatedAt: n.updatedAt ? n.updatedAt : new Date().toISOString(),
+    teamInfo: typeof n.teamInfo === 'string' ? n.teamInfo : null,
+    teamBy: typeof n.teamBy === 'string' ? n.teamBy : null,
+    teamSyncAt: n.teamSyncAt ? n.teamSyncAt : 0,
+    children: Array.isArray(n.children) ? n.children.map(normalizeNote) : [],
+    expanded: n.expanded !== false
+  };
+}
 
-      function activeNote() { return findNoteById(notes, activeId); }
+// root -> ... -> note
+function findPath(arr, id, trail = []) {
+  for (const n of arr) {
+    const next = trail.concat(n);
+    if (n.id === id) return next;
+    const f = findPath(n.children || [], id, next);
+    if (f) return f;
+  }
+  return null;
+}
+function locate(arr, id, parent = null) {
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i].id === id) return { siblings: arr, index: i, parent };
+    const f = locate(arr[i].children || [], id, arr[i]);
+    if (f) return f;
+  }
+  return null;
+}
+const noteDepth = (id) => { const p = findPath(notes, id); return p ? p.length - 1 : 0; };
+// make sure every ancestor is expanded so the open note is visible in the list
+function revealNote(id) {
+  const p = findPath(notes, id);
+  if (p) p.slice(0, -1).forEach((n) => { n.expanded = true; });
+}
+// what to open after deleting: next sibling, else previous sibling, else parent
+function pickAfterDelete(id) {
+  const loc = locate(notes, id);
+  if (!loc) return null;
+  const pick = loc.siblings[loc.index + 1] || loc.siblings[loc.index - 1] || loc.parent;
+  return pick ? pick.id : null;
+}
+
+function renderCrumbs() {
+  const box = $('note-crumbs');
+  const path = teamMode ? null : findPath(notes, activeId);
+  box.replaceChildren();
+  if (!path || path.length < 2) { box.hidden = true; return; }
+  path.slice(0, -1).forEach((n) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = n.title || 'Untitled note';
+    b.addEventListener('click', () => openNote(n.id));
+    const sep = document.createElement('span');
+    sep.textContent = '\u203A';
+    box.append(b, sep);
+  });
+  const cur = document.createElement('b');
+  cur.textContent = path[path.length - 1].title || 'Untitled note';
+  box.appendChild(cur);
+  box.hidden = false;
+}
+
+function activeNote() { return findNoteById(notes, activeId); }
+
+function findNoteById(arr, id) {
+  for (const note of arr) {
+    if (note.id === id) return note;
+    const found = findNoteById(note.children || [], id);
+    if (found) return found;
+  }
+  return null;
+}
 
       // Remembers which shared doc each of my notes was sent to, so teammate edits can come back into the note.
       function loadNoteLinks() {
@@ -349,6 +416,7 @@
       function openNote(id) {
         leaveTeamMode();
         activeId = id;
+        revealNote(id);
         if (bannerNoteId !== id) hideTeamBanner();
         const note = activeNote();
         if (!note) { showEditor(false); return; }
@@ -356,6 +424,7 @@
         title.value = note.title || '';
         body.innerHTML = note.body || '';
         date.textContent = `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}`;
+        renderCrumbs();
         syncTeamUi();
         renderList();
       }
@@ -371,130 +440,121 @@
         title.focus();
       }
 
-      function addSubnote(parentId) {
-        leaveTeamMode();
-        const parent = findNoteById(notes, parentId);
-        if (!parent) return;
-        const now = new Date().toISOString();
-        const subnote = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, title: '', body: '', updatedAt: now, children: [], expanded: true };
-        if (!parent.children) parent.children = [];
-        parent.children.push(subnote);
-        parent.expanded = true;
-        activeId = subnote.id;
-        saveNotes();
-        openNote(subnote.id);
-        title.focus();
-      }
+function addSubnote(parentId) {
+  leaveTeamMode();
+  const parent = findNoteById(notes, parentId);
+  if (!parent) return;
+  if (noteDepth(parentId) >= MAX_DEPTH) {
+    window.alert('Subnotes can go ' + (MAX_DEPTH + 1) + ' levels deep at most.');
+    return;
+  }
+  const sub = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, title: '', body: '', updatedAt: new Date().toISOString(), children: [], expanded: true };
+  parent.children.push(sub);
+  parent.expanded = true;
+  animateId = parent.id;
+  saveNotes();
+  openNote(sub.id);
+  title.focus();
+}
 
-      function findNoteById(arr, id) {
-        for (const note of arr) {
-          if (note.id === id) return note;
-          const found = findNoteById(note.children || [], id);
-          if (found) return found;
-        }
-        return null;
-      }
+function updateNote() {
+  if (teamMode) { teamDocEdited(); return; }
+  const note = activeNote();
+  if (!note) return;
+  note.title = title.value;
+  note.body = body.innerHTML;
+  note.updatedAt = new Date().toISOString();
+  date.textContent = `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}`;
+  saveNotes();
+  renderCrumbs();
+  notePushedToTeam();
+}
 
-      function findParentAndIndex(arr, id, parentArr = null, parentIndex = -1) {
-        for (let i = 0; i < arr.length; i++) {
-          if (arr[i].id === id) return { parentArr, parentIndex: i };
-          const found = findParentAndIndex(arr[i].children || [], id, arr[i].children, i);
-          if (found) return found;
-        }
-        return null;
-      }
+const pendingPush = new Set();
 
-      function updateNote() {
-        if (teamMode) { teamDocEdited(); return; }
-        const note = activeNote();
-        if (!note) return;
-        note.title = title.value;
-        note.body = body.innerHTML;
-        note.updatedAt = new Date().toISOString();
-        date.textContent = `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}`;
-        saveNotes();
-        notePushedToTeam();
-      }
+function notePushedToTeam() {
+  if (activeId) pendingPush.add(activeId);
+  clearTimeout(notePushTimer);
+  notePushTimer = setTimeout(flushNotePush, 900);
+}
 
-      // If this note was shared with a team, my local edits go to the team doc too, so the
-      // round trip works in both directions (theirs -> my note, mine -> their doc).
-      function notePushedToTeam() {
-        clearTimeout(notePushTimer);
-        notePushTimer = setTimeout(() => { notePushTimer = null; pushNoteToTeamDoc(); }, 900);
-      }
+function flushNotePush() {
+  clearTimeout(notePushTimer);
+  notePushTimer = null;
+  const ids = [...pendingPush];
+  pendingPush.clear();
+  ids.forEach((id) => pushNoteToTeamDoc(id));
+}
 
-      function pushNoteToTeamDoc() {
-        const u = me(), d = dbase();
-        const note = activeNote();
-        if (!u || !d || !note || teamMode) return;
-        const key = Object.keys(noteLinks).find((k) => noteLinks[k].noteId === note.id);
-        if (!key) return;
-        const link = noteLinks[key];
-        const doc = (teamDocsMap[link.teamId] || []).find((x) => x.id === link.docId);
-        if (!doc || !canEditDoc(doc.data())) return;
-        const base = doc.data();
-        // same rule as everywhere: what I added gets my name, what is unchanged keeps its author
-        const html = tagMyContribution(cleanDocHtml(note.body), base.body, base.ownerId);
-        if (html.length > DOC_MAX) { setTdStatus('Note is too large to sync (limit ≈ 200 KB)', true); return; }
-        doc.ref.update({
-          title: (note.title || '').trim().slice(0, 120) || 'Untitled note',
-          body: html,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedBy: u.uid,
-          updatedByName: myName()
-        }).then(() => {
-          appliedStamps[stampKey(link.teamId, link.docId)] = Date.now();
-          note.teamInfo = null;
-          note.teamBy = null;
-          saveNotes();
-        }).catch((err) => setTdStatus('Could not sync to the team doc: ' + ((err && err.message) || err), true));
-      }
+function pushNoteToTeamDoc(noteId) {
+  const u = me(), d = dbase();
+  const note = findNoteById(notes, noteId);
+  if (!u || !d || !note) return;
+  const key = Object.keys(noteLinks).find((k) => noteLinks[k].noteId === note.id);
+  if (!key) return;
+  const link = noteLinks[key];
+  const doc = (teamDocsMap[link.teamId] || []).find((x) => x.id === link.docId);
+  if (!doc || !canEditDoc(doc.data())) return;
+  const base = doc.data();
+  // same rule as everywhere: what I added gets my name, what is unchanged keeps its author
+  const html = tagMyContribution(cleanDocHtml(note.body), base.body, base.ownerId);
+  if (html.length > DOC_MAX) { setTdStatus('Note is too large to sync (limit \u2248 200 KB)', true); return; }
+  doc.ref.update({
+    title: (note.title || '').trim().slice(0, 120) || 'Untitled note',
+    body: html,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedBy: u.uid,
+    updatedByName: myName()
+  }).then(() => {
+    appliedStamps[stampKey(link.teamId, link.docId)] = Date.now();
+    note.teamInfo = null;
+    note.teamBy = null;
+    saveNotes();
+  }).catch((err) => setTdStatus('Could not sync to the team doc: ' + ((err && err.message) || err), true));
+}
 
-      function deleteNote(id) {
-        if (!window.confirm('Delete this note and all its subnotes?')) return;
-        const deletedNote = findNoteById(notes, id);
-        if (deletedNote && deletedNote.children && deletedNote.children.length > 0) {
-          collectAllIds(deletedNote.children).forEach((childId) => {
-            Object.keys(noteLinks).forEach((k) => { if (noteLinks[k].noteId === childId) delete noteLinks[k]; });
-          });
-        }
-        notes = removeNoteById(notes, id);
-        Object.keys(noteLinks).forEach((k) => { if (noteLinks[k].noteId === id) delete noteLinks[k]; });
-        saveNoteLinks();
-        if (bannerNoteId === id) hideTeamBanner();
-        if (!teamMode && activeId === id) {
-          const next = getNextNote(notes, id);
-          activeId = next || null;
-          if (activeId) { saveNotes(); openNote(activeId); }
-          else { saveNotes(); title.value = ''; body.innerHTML = ''; date.textContent = ''; showEditor(false); renderList(); syncTeamUi(); }
-        } else { if (activeId === id) activeId = null; saveNotes(); }
-      }
+function deleteNote(id) {
+  const target = findNoteById(notes, id);
+  if (!target) return;
+  const total = countAllNotes([target]);
+  const msg = total > 1 ? 'Delete this note and its ' + (total - 1) + ' subnote' + (total > 2 ? 's' : '') + '?' : 'Delete this note?';
+  if (!window.confirm(msg)) return;
 
-      function removeNoteById(arr, id) {
-        return arr.filter((note) => {
-          if (note.id === id) return false;
-          if (note.children) note.children = removeNoteById(note.children, id);
-          return true;
-        });
-      }
+  const removed = collectAllIds([target]).concat(id);
+  const fallback = pickAfterDelete(id);
+  const activeRemoved = !teamMode && removed.includes(activeId);
 
-      function collectAllIds(arr) {
-        const ids = [];
-        arr.forEach((n) => { ids.push(n.id); if (n.children) ids.push(...collectAllIds(n.children)); });
-        return ids;
-      }
+  notes = removeNoteById(notes, id);
+  Object.keys(noteLinks).forEach((k) => { if (removed.includes(noteLinks[k].noteId)) delete noteLinks[k]; });
+  saveNoteLinks();
+  if (removed.includes(bannerNoteId)) hideTeamBanner();
+  saveNotes();
 
-      function getNextNote(arr, currentId) {
-        let found = false;
-        for (const note of arr) {
-          if (found) return note.id;
-          if (note.id === currentId) { found = true; continue; }
-          if (note.children && note.children.length > 0) {
-            const child = getNextNote(note.children, currentId);
-            if (child) return child;
-          }
-        }
-        return arr[0]?.id || null;
+  if (activeRemoved) {
+    if (fallback) openNote(fallback);
+    else {
+      activeId = null;
+      title.value = ''; body.innerHTML = ''; date.textContent = '';
+      showEditor(false); renderCrumbs(); syncTeamUi();
+    }
+  }
+}
+
+function removeNoteById(arr, id) {
+  return arr.filter((note) => {
+    if (note.id === id) return false;
+    if (note.children) note.children = removeNoteById(note.children, id);
+    return true;
+  });
+}
+
+function collectAllIds(arr) {
+  const ids = [];
+  arr.forEach((n) => { ids.push(n.id); if (n.children) ids.push(...collectAllIds(n.children)); });
+  return ids;
+}
+
+function closestHighlight(node) {
       }
 
       function closestHighlight(node) {
@@ -564,6 +624,7 @@
         const loggedIn = !!(me() && dbase());
         $('team-docs-wrap').hidden = !loggedIn;
         $('share-team-btn').hidden = !loggedIn || !!teamMode || !activeNote();
+        $('add-subnote-btn').hidden = !!teamMode || !activeNote();
         if (loggedIn && !userTeamsUnsub) startTeamWatch();
         if (!loggedIn && userTeamsUnsub) stopTeamWatch();
       }
@@ -631,7 +692,7 @@
           (teamDocsMap[teamId] || []).forEach((doc) => {
             const link = linkFor(teamId, doc.id);
             if (!link || !link.noteId) return;
-            const note = notes.find((n) => n.id === link.noteId);
+            const note = findNoteById(notes, link.noteId);
             if (!note) return;
             const d = doc.data({ serverTimestamps: 'estimate' });
             const stamp = tsMs(d.updatedAt);
@@ -691,57 +752,37 @@
           list.appendChild(empty);
           return;
         }
-        notes.forEach((note) => {
-          list.appendChild(buildNoteItem(note, 0));
-        });
-      }
-
-      function countAllNotes(arr) {
-        let total = 0;
-        arr.forEach((n) => { total += 1; total += countAllNotes(n.children || []); });
-        return total;
+        notes.forEach((n) => list.appendChild(buildNoteItem(n, 0)));
+        animateId = null;
       }
 
       function buildNoteItem(note, depth) {
-        const item = document.createElement('div');
-        item.className = `np-item${!teamMode && note.id === activeId ? ' active' : ''}${depth > 0 ? ' np-nested' : ''}`;
-        item.style.setProperty('--nest-depth', depth);
+        const node = document.createElement('div');
+        node.className = 'np-node';
+        const hasKids = note.children && note.children.length > 0;
 
-        const wrapper = document.createElement('div');
-        wrapper.className = 'np-item-wrapper';
-        wrapper.style.display = 'flex';
-        wrapper.style.alignItems = 'center';
-        wrapper.style.gap = '4px';
-        wrapper.style.width = '100%';
+        const row = document.createElement('div');
+        row.className = 'np-item' + (!teamMode && note.id === activeId ? ' active' : '');
 
-        if (note.children && note.children.length > 0) {
-          const toggle = document.createElement('button');
-          toggle.type = 'button';
-          toggle.className = 'np-toggle';
-          toggle.setAttribute('aria-label', note.expanded ? 'Collapse' : 'Expand');
-          toggle.title = note.expanded ? 'Collapse' : 'Expand';
-          toggle.innerHTML = note.expanded ? '<i class="fa-solid fa-chevron-down"></i>' : '<i class="fa-solid fa-chevron-right"></i>';
-          toggle.style.width = '20px';
-          toggle.style.height = '20px';
-          toggle.style.border = '0';
-          toggle.style.background = 'transparent';
-          toggle.style.color = 'var(--muted)';
-          toggle.style.cursor = 'pointer';
-          toggle.style.flex = 'none';
-          toggle.style.display = 'flex';
-          toggle.style.alignItems = 'center';
-          toggle.style.justifyContent = 'center';
-          toggle.addEventListener('click', (e) => {
+        if (hasKids) {
+          const t = document.createElement('button');
+          t.type = 'button';
+          t.className = 'np-toggle';
+          t.title = note.expanded ? 'Collapse' : 'Expand';
+          t.setAttribute('aria-label', t.title);
+          t.setAttribute('aria-expanded', String(!!note.expanded));
+          t.innerHTML = '<i class="fa-solid fa-chevron-' + (note.expanded ? 'down' : 'right') + '"></i>';
+          t.addEventListener('click', (e) => {
             e.stopPropagation();
             note.expanded = !note.expanded;
+            animateId = note.expanded ? note.id : null;
             saveNotes();
           });
-          wrapper.appendChild(toggle);
+          row.appendChild(t);
         } else {
-          const spacer = document.createElement('span');
-          spacer.style.width = '20px';
-          spacer.style.flex = 'none';
-          wrapper.appendChild(spacer);
+          const sp = document.createElement('span');
+          sp.className = 'np-toggle-spacer';
+          row.appendChild(sp);
         }
 
         const main = document.createElement('button');
@@ -762,21 +803,36 @@
 
         const actions = document.createElement('div');
         actions.className = 'np-item-actions';
-        actions.style.display = 'flex';
-        actions.style.gap = '2px';
-        actions.style.flex = 'none';
+        if (depth < MAX_DEPTH) {
+          const add = document.createElement('button');
+          add.type = 'button';
+          add.className = 'np-add-sub';
+          add.title = 'Add subnote';
+          add.setAttribute('aria-label', 'Add subnote');
+          add.innerHTML = '<i class="fa-solid fa-plus"></i>';
+          add.addEventListener('click', (e) => { e.stopPropagation(); addSubnote(note.id); });
+          actions.appendChild(add);
+        }
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'np-del';
+        del.title = 'Delete note';
+        del.setAttribute('aria-label', 'Delete note');
+        del.textContent = '\u00D7';
+        del.addEventListener('click', (e) => { e.stopPropagation(); deleteNote(note.id); });
+        actions.appendChild(del);
 
-        const addSub = document.createElement('button');
-        addSub.type = 'button';
-        addSub.className = 'np-add-sub';
-        addSub.setAttribute('aria-label', 'Add subnote');
-        addSub.title = 'Add subnote';
-        addSub.innerHTML = '<i class="fa-solid fa-plus"></i>';
-        addSub.style.width = '22px';
-        addSub.style.height = '22px';
-        addSub.style.border = '0';
-        addSub.style.borderRadius = '6px';
-        addSub.style.background = 'transparent';
+        row.append(main, actions);
+        node.appendChild(row);
+
+        if (hasKids && note.expanded) {
+          const kids = document.createElement('div');
+          kids.className = 'np-children' + (animateId === note.id ? ' np-anim' : '');
+          note.children.forEach((c) => kids.appendChild(buildNoteItem(c, depth + 1)));
+          node.appendChild(kids);
+        }
+        return node;
+      }
         addSub.style.color = 'var(--muted)';
         addSub.style.cursor = 'pointer';
         addSub.style.display = 'flex';
@@ -877,6 +933,7 @@
         activeId = null;
         hideTeamBanner();
         showEditor(true);
+        renderCrumbs();
         renderList();
         fillTeamDoc(doc, true);
         renderTeamDocs();
@@ -1165,6 +1222,7 @@
         });
       });
       $('highlight-btn').addEventListener('click', toggleHighlight);
+      $('add-subnote-btn').addEventListener('click', () => { if (activeId) addSubnote(activeId); });
       document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => {
         if (body.contentEditable === 'false') return;   // read-only: the toolbar is disabled, and this is the belt
         document.execCommand(button.dataset.command, false, button.dataset.value || null);
@@ -1180,7 +1238,7 @@
       $('share-create-btn').addEventListener('click', createTeamFromDialog);
       $('np-join-team').addEventListener('click', quickJoin);
       $('ntb-dismiss').addEventListener('click', () => {
-        const note = notes.find((n) => n.id === bannerNoteId);
+        const note = findNoteById(notes, bannerNoteId);
         if (note) { note.teamInfo = null; saveNotes(); }
         hideTeamBanner();
       });
