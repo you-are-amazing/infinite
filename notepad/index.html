@@ -275,19 +275,25 @@
         try {
           const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
           if (!Array.isArray(value)) return [];
-          return value.map((n) => ({
-            id: n && n.id ? n.id : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            title: (n && typeof n.title === 'string') ? n.title : '',
-            body: (n && typeof n.body === 'string') ? n.body : '',
-            updatedAt: (n && n.updatedAt) ? n.updatedAt : new Date().toISOString(),
-            teamInfo: (n && typeof n.teamInfo === 'string') ? n.teamInfo : null,
-            teamBy: (n && typeof n.teamBy === 'string') ? n.teamBy : null,
-            teamSyncAt: (n && n.teamSyncAt) ? n.teamSyncAt : 0,
-          }));
+          return value.map((n) => normalizeNote(n));
         } catch (error) { return []; }
       }
 
-      function activeNote() { return notes.find((note) => note.id === activeId); }
+      function normalizeNote(n) {
+        return {
+          id: n && n.id ? n.id : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          title: (n && typeof n.title === 'string') ? n.title : '',
+          body: (n && typeof n.body === 'string') ? n.body : '',
+          updatedAt: (n && n.updatedAt) ? n.updatedAt : new Date().toISOString(),
+          teamInfo: (n && typeof n.teamInfo === 'string') ? n.teamInfo : null,
+          teamBy: (n && typeof n.teamBy === 'string') ? n.teamBy : null,
+          teamSyncAt: (n && n.teamSyncAt) ? n.teamSyncAt : 0,
+          children: Array.isArray(n.children) ? n.children.map(normalizeNote) : [],
+          expanded: n.expanded !== false
+        };
+      }
+
+      function activeNote() { return findNoteById(notes, activeId); }
 
       // Remembers which shared doc each of my notes was sent to, so teammate edits can come back into the note.
       function loadNoteLinks() {
@@ -357,12 +363,45 @@
       function createNote() {
         leaveTeamMode();
         const now = new Date().toISOString();
-        const note = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, title: '', body: '', updatedAt: now };
+        const note = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, title: '', body: '', updatedAt: now, children: [], expanded: true };
         notes.unshift(note);
         activeId = note.id;
         saveNotes();
         openNote(note.id);
         title.focus();
+      }
+
+      function addSubnote(parentId) {
+        leaveTeamMode();
+        const parent = findNoteById(notes, parentId);
+        if (!parent) return;
+        const now = new Date().toISOString();
+        const subnote = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, title: '', body: '', updatedAt: now, children: [], expanded: true };
+        if (!parent.children) parent.children = [];
+        parent.children.push(subnote);
+        parent.expanded = true;
+        activeId = subnote.id;
+        saveNotes();
+        openNote(subnote.id);
+        title.focus();
+      }
+
+      function findNoteById(arr, id) {
+        for (const note of arr) {
+          if (note.id === id) return note;
+          const found = findNoteById(note.children || [], id);
+          if (found) return found;
+        }
+        return null;
+      }
+
+      function findParentAndIndex(arr, id, parentArr = null, parentIndex = -1) {
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i].id === id) return { parentArr, parentIndex: i };
+          const found = findParentAndIndex(arr[i].children || [], id, arr[i].children, i);
+          if (found) return found;
+        }
+        return null;
       }
 
       function updateNote() {
@@ -412,16 +451,50 @@
       }
 
       function deleteNote(id) {
-        if (!window.confirm('Delete this note?')) return;
-        notes = notes.filter((note) => note.id !== id);
+        if (!window.confirm('Delete this note and all its subnotes?')) return;
+        const deletedNote = findNoteById(notes, id);
+        if (deletedNote && deletedNote.children && deletedNote.children.length > 0) {
+          collectAllIds(deletedNote.children).forEach((childId) => {
+            Object.keys(noteLinks).forEach((k) => { if (noteLinks[k].noteId === childId) delete noteLinks[k]; });
+          });
+        }
+        notes = removeNoteById(notes, id);
         Object.keys(noteLinks).forEach((k) => { if (noteLinks[k].noteId === id) delete noteLinks[k]; });
         saveNoteLinks();
         if (bannerNoteId === id) hideTeamBanner();
         if (!teamMode && activeId === id) {
-          activeId = notes[0]?.id || null;
+          const next = getNextNote(notes, id);
+          activeId = next || null;
           if (activeId) { saveNotes(); openNote(activeId); }
           else { saveNotes(); title.value = ''; body.innerHTML = ''; date.textContent = ''; showEditor(false); renderList(); syncTeamUi(); }
         } else { if (activeId === id) activeId = null; saveNotes(); }
+      }
+
+      function removeNoteById(arr, id) {
+        return arr.filter((note) => {
+          if (note.id === id) return false;
+          if (note.children) note.children = removeNoteById(note.children, id);
+          return true;
+        });
+      }
+
+      function collectAllIds(arr) {
+        const ids = [];
+        arr.forEach((n) => { ids.push(n.id); if (n.children) ids.push(...collectAllIds(n.children)); });
+        return ids;
+      }
+
+      function getNextNote(arr, currentId) {
+        let found = false;
+        for (const note of arr) {
+          if (found) return note.id;
+          if (note.id === currentId) { found = true; continue; }
+          if (note.children && note.children.length > 0) {
+            const child = getNextNote(note.children, currentId);
+            if (child) return child;
+          }
+        }
+        return arr[0]?.id || null;
       }
 
       function closestHighlight(node) {
@@ -608,7 +681,7 @@
 
       // Badge in the notes list so a change is visible even when the note is not open.
       function renderList() {
-        count.textContent = notes.length;
+        count.textContent = countAllNotes(notes);
         list.replaceChildren();
         if (!notes.length) {
           const empty = document.createElement('div');
@@ -619,39 +692,130 @@
           return;
         }
         notes.forEach((note) => {
-          const item = document.createElement('div');
-          item.className = `np-item${!teamMode && note.id === activeId ? ' active' : ''}`;
-
-          const main = document.createElement('button');
-          main.type = 'button';
-          main.className = 'np-item-main';
-          const heading = document.createElement('b');
-          heading.textContent = note.title || 'Untitled note';
-          const preview = document.createElement('span');
-          preview.textContent = (note.body || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || 'Empty note';
-          main.append(heading, preview);
-          if (note.teamInfo) {
-            const tag = document.createElement('em');
-            tag.className = 'np-item-tag';
-            tag.textContent = note.teamInfo;
-            main.appendChild(tag);
-          }
-          main.addEventListener('click', () => openNote(note.id));
-
-          const del = document.createElement('button');
-          del.type = 'button';
-          del.className = 'np-del';
-          del.setAttribute('aria-label', 'Delete note');
-          del.title = 'Delete note';
-          del.textContent = '×';
-          del.addEventListener('click', (event) => {
-            event.stopPropagation();
-            deleteNote(note.id);
-          });
-
-          item.append(main, del);
-          list.appendChild(item);
+          list.appendChild(buildNoteItem(note, 0));
         });
+      }
+
+      function countAllNotes(arr) {
+        let total = 0;
+        arr.forEach((n) => { total += 1; total += countAllNotes(n.children || []); });
+        return total;
+      }
+
+      function buildNoteItem(note, depth) {
+        const item = document.createElement('div');
+        item.className = `np-item${!teamMode && note.id === activeId ? ' active' : ''}${depth > 0 ? ' np-nested' : ''}`;
+        item.style.setProperty('--nest-depth', depth);
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'np-item-wrapper';
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.gap = '4px';
+        wrapper.style.width = '100%';
+
+        if (note.children && note.children.length > 0) {
+          const toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.className = 'np-toggle';
+          toggle.setAttribute('aria-label', note.expanded ? 'Collapse' : 'Expand');
+          toggle.title = note.expanded ? 'Collapse' : 'Expand';
+          toggle.innerHTML = note.expanded ? '<i class="fa-solid fa-chevron-down"></i>' : '<i class="fa-solid fa-chevron-right"></i>';
+          toggle.style.width = '20px';
+          toggle.style.height = '20px';
+          toggle.style.border = '0';
+          toggle.style.background = 'transparent';
+          toggle.style.color = 'var(--muted)';
+          toggle.style.cursor = 'pointer';
+          toggle.style.flex = 'none';
+          toggle.style.display = 'flex';
+          toggle.style.alignItems = 'center';
+          toggle.style.justifyContent = 'center';
+          toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            note.expanded = !note.expanded;
+            saveNotes();
+          });
+          wrapper.appendChild(toggle);
+        } else {
+          const spacer = document.createElement('span');
+          spacer.style.width = '20px';
+          spacer.style.flex = 'none';
+          wrapper.appendChild(spacer);
+        }
+
+        const main = document.createElement('button');
+        main.type = 'button';
+        main.className = 'np-item-main';
+        const heading = document.createElement('b');
+        heading.textContent = note.title || 'Untitled note';
+        const preview = document.createElement('span');
+        preview.textContent = (note.body || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || 'Empty note';
+        main.append(heading, preview);
+        if (note.teamInfo) {
+          const tag = document.createElement('em');
+          tag.className = 'np-item-tag';
+          tag.textContent = note.teamInfo;
+          main.appendChild(tag);
+        }
+        main.addEventListener('click', () => openNote(note.id));
+
+        const actions = document.createElement('div');
+        actions.className = 'np-item-actions';
+        actions.style.display = 'flex';
+        actions.style.gap = '2px';
+        actions.style.flex = 'none';
+
+        const addSub = document.createElement('button');
+        addSub.type = 'button';
+        addSub.className = 'np-add-sub';
+        addSub.setAttribute('aria-label', 'Add subnote');
+        addSub.title = 'Add subnote';
+        addSub.innerHTML = '<i class="fa-solid fa-plus"></i>';
+        addSub.style.width = '22px';
+        addSub.style.height = '22px';
+        addSub.style.border = '0';
+        addSub.style.borderRadius = '6px';
+        addSub.style.background = 'transparent';
+        addSub.style.color = 'var(--muted)';
+        addSub.style.cursor = 'pointer';
+        addSub.style.display = 'flex';
+        addSub.style.alignItems = 'center';
+        addSub.style.justifyContent = 'center';
+        addSub.addEventListener('click', (e) => {
+          e.stopPropagation();
+          addSubnote(note.id);
+        });
+        actions.appendChild(addSub);
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'np-del';
+        del.setAttribute('aria-label', 'Delete note');
+        del.title = 'Delete note';
+        del.textContent = '×';
+        del.addEventListener('click', (event) => {
+          event.stopPropagation();
+          deleteNote(note.id);
+        });
+        actions.appendChild(del);
+
+        wrapper.append(main, actions);
+        item.appendChild(wrapper);
+
+        if (note.children && note.children.length > 0 && note.expanded) {
+          const childrenContainer = document.createElement('div');
+          childrenContainer.className = 'np-children';
+          childrenContainer.style.marginLeft = '16px';
+          childrenContainer.style.borderLeft = '1px solid var(--line-soft)';
+          childrenContainer.style.paddingLeft = '8px';
+          note.children.forEach((child) => {
+            childrenContainer.appendChild(buildNoteItem(child, depth + 1));
+          });
+          item.appendChild(childrenContainer);
+        }
+
+        return item;
       }
 
       function renderTeamDocs() {

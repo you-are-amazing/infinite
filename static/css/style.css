@@ -1871,6 +1871,31 @@ table.lsheet td {
   color: #fff;
 }
 
+.np-nested {
+  background: var(--surface2);
+}
+.np-nested:hover,
+.np-nested.active {
+  background: var(--surface3);
+}
+.np-toggle:hover {
+  color: var(--lav) !important;
+}
+.np-add-sub:hover {
+  background: var(--surface3) !important;
+  color: var(--green) !important;
+}
+.np-item-wrapper {
+  position: relative;
+}
+.np-children {
+  animation: np-slide-down 150ms ease-out;
+}
+@keyframes np-slide-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .np-side-foot {
   margin-top: auto;
   padding: 13px 16px;
