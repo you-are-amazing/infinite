@@ -58,6 +58,9 @@
     { page: 'home', target: '#sticky-bell-btn', place: 'bottom', icon: 'fa-thumbtack',
       title: 'Sticky notes',
       text: 'Pin important reminders here. The pin glows while something is still pending.' },
+    { page: 'home', target: '#inspire-rail', place: 'left', icon: 'fa-lightbulb',
+      title: 'Inspire Feed',
+      text: 'Paste any <b>YouTube video or song link</b> that motivates you. Only its thumbnail shows in this box, and clicking it jumps straight to the video.' },
 
     { page: 'calendar', target: '.cal-controls', place: 'bottom', icon: 'fa-calendar-week',
       title: 'Life Calendar: set it up',
