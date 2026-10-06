@@ -1,0 +1,33 @@
+# ai-worker — Cloudflare Worker for Infinite AI.
+# Copy this file to wrangler.toml and fill in your own values:
+#   cp wrangler.example.toml wrangler.toml
+# wrangler.toml is gitignored, so your own key and account name never get committed.
+# Deploy with:  cd ai-worker && npx wrangler deploy
+
+name = "infinite-ai"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Free plan limits are generous enough here (100k requests/day), so leave workers_dev on.
+workers_dev = true
+
+[vars]
+# The Firebase Web API key. It is public (it ships in static/js/auth.js already); the Worker
+# only needs it to verify a signed-in user with Google Identity Toolkit.
+FIREBASE_API_KEY = ""
+# A free router model. If this one disappears the Worker falls back to the built-in list
+# in src/index.js, so setting it is optional.
+HF_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+# Messages per user per UTC day. Kept in the Worker's memory, so it is a guard rail.
+DAILY_LIMIT = "40"
+# Your site's origin, comma separated. The browser calls the Worker directly, so this is
+# what stops somebody else's page from using your quota.
+ALLOWED_ORIGINS = "https://<username>.github.io,http://127.0.0.1:5500,http://localhost:5500"
+
+# HF_TOKEN is a secret, never a var:
+#   npx wrangler secret put HF_TOKEN
+# TURNSTILE_SECRET is a secret too, for POST /verify-turnstile:
+#   npx wrangler secret put TURNSTILE_SECRET
+
+[observability]
+enabled = true

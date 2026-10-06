@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team Goals - Infinite</title>
+  <meta name="description" content="Create or join a team, share goals, chat and cheer each other on.">
+  <link rel="icon" href="../deserve.png" type="image/png">
+  <link rel="stylesheet" href="../static/css/style.css?v=36">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js" defer></script>
+  <script src="../static/js/auth.js?v=10" defer></script>
+  <script src="../static/js/doc-attrib.js?v=2" defer></script>
+  <script src="../static/js/team.js?v=12" defer></script>
+  <script src="../static/js/team-notify.js?v=4" defer></script>
+  <script src="../static/js/ai-chat.js?v=9" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="side-logo">
+      <img src="../deserve.png" alt="Infinite">
+      <div><div class="t1">Infinite</div><div class="t2">We deserve better</div></div>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item" href="../"><i class="fa-solid fa-house"></i><em>Overview</em></a>
+      <a class="nav-item" href="../calendar/"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
+      <a class="nav-item" href="../notepad/"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
+      <a class="nav-item active" href="./"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
+        <a class="nav-item" href="../contact/"><i class="fa-solid fa-envelope"></i><em>Connect</em></a>
+    </nav>
+
+    <!-- My teams -->
+    <div class="team-list-wrap" id="team-list-wrap">
+      <div class="team-list-label">YOUR TEAMS</div>
+      <div id="team-list">
+        <div class="empty-list">Sign in to see your teams.</div>
+      </div>
+    </div>
+
+    <div class="side-foot">
+      <div class="sync-row"><span class="sync-dot"></span><span id="tm-sync">SYNCED · CLOUD</span></div>
+      <div class="user-chip">
+        <div class="avatar" id="user-initial">?</div>
+        <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-wrap">
+    <div class="topbar">
+      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>TEAM GOALS</b></span>
+      <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
+      <div class="top-actions">
+        <div id="auth-account-actions" class="auth-account-actions" hidden></div>
+      </div>
+    </div>
+
+    <div class="page page-wide">
+      <div class="page-head">
+        <div>
+          <div class="kicker"><span class="dot"></span>SHARED GOALS · LIVE CHAT · WINS</div>
+          <h1 class="page-title">Team Goals</h1>
+          <div class="page-sub">WORK WITH FRIENDS · EVERYONE SEES PROGRESS IN REAL TIME</div>
+        </div>
+        <div class="head-actions">
+          <button type="button" id="create-team-btn" class="btn btn-green"><i class="fa-solid fa-plus"></i>Create team</button>
+          <button type="button" id="join-team-btn" class="btn"><i class="fa-solid fa-right-to-bracket"></i>Join with code</button>
+        </div>
+      </div>
+
+      <!-- Signed out -->
+      <div id="no-auth-state" class="no-auth-state" hidden>
+        <i class="fa-solid fa-lock"></i>
+        <h2>Sign in to use teams</h2>
+        <p>Team goals, chat and rewards are shared between real accounts, so guest mode can't be used here.</p>
+        <form id="team-auth-form" novalidate>
+          <div id="team-auth-name-wrap" hidden>
+            <input id="team-auth-name" type="text" placeholder="Your name" autocomplete="name">
+          </div>
+          <input id="team-auth-email" type="email" placeholder="Email" autocomplete="email" required>
+          <input id="team-auth-password" type="password" placeholder="Password (6+ characters)" autocomplete="current-password" minlength="6" required>
+          <p class="form-error" id="team-auth-error"></p>
+          <button id="team-auth-submit" type="submit" class="auth-button auth-button-primary">Sign in</button>
+          <button type="button" class="auth-toggle" id="team-auth-toggle">Don't have an account? Sign up</button>
+        </form>
+      </div>
+
+      <!-- Signed in, no team selected -->
+      <div id="no-team-state" class="no-team-state" hidden>
+        <i class="fa-solid fa-people-group"></i>
+        <h2>No team yet</h2>
+        <p>Create a team and invite friends with a 6-letter code, or join a friend's team with theirs.</p>
+        <p style="font-size:12.5px; color:var(--faint);">Use the <b style="color:var(--text);">Create team</b> or <b style="color:var(--text);">Join with code</b> buttons at the top right to get started.</p>
+      </div>
+
+      <!-- Team content -->
+      <div id="team-content" hidden>
+        <div class="team-head">
+          <div>
+            <div class="team-name"><i class="fa-solid fa-users"></i><span id="team-name">Team</span></div>
+            <div class="team-sub" id="team-sub">0 MEMBERS</div>
+          </div>
+          <div class="member-avatars" id="member-avatars"></div>
+          <div class="invite-chip">INVITE <code id="team-invite-code">------</code>
+            <button type="button" id="copy-invite-btn" title="Copy invite code" aria-label="Copy invite code"><i class="fa-regular fa-copy"></i></button>
+          </div>
+          <div class="team-head-actions">
+            <button type="button" id="leave-team-btn" class="btn btn-quiet"><i class="fa-solid fa-arrow-right-from-bracket"></i>Leave team</button>
+          </div>
+        </div>
+
+        <div class="metrics" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">
+          <div class="metric-card">
+            <div class="ml"><i class="fa-solid fa-users"></i>MEMBERS</div>
+            <div class="mv" id="members-count">0</div>
+            <div class="ms">holding each other accountable</div>
+          </div>
+          <div class="metric-card">
+            <div class="ml"><i class="fa-solid fa-bullseye"></i>GOALS</div>
+            <div class="mv amber" id="goals-count">0</div>
+            <div class="ms">team + personal, live sync</div>
+          </div>
+          <div class="metric-card">
+            <div class="ml"><i class="fa-solid fa-comments"></i>CHAT</div>
+            <div class="mv lav">LIVE</div>
+            <div class="ms">cheer each other on →</div>
+          </div>
+        </div>
+
+        <div class="team-tabs">
+          <button type="button" class="team-tab active" data-tab="goals"><i class="fa-solid fa-bullseye"></i>Goals</button>
+          <button type="button" class="team-tab" data-tab="docs"><i class="fa-solid fa-file-lines"></i>Docs <span class="cnt" id="docs-count">0</span></button>
+          <button type="button" class="team-tab" data-tab="rewards"><i class="fa-solid fa-trophy"></i>Wins</button>
+          <button type="button" class="team-tab" data-tab="members"><i class="fa-solid fa-user-group"></i>Members</button>
+        </div>
+
+        <div id="tab-goals" class="panel">
+          <div class="commit-row">
+            <input type="text" id="goal-title-input" maxlength="140" placeholder="Add a goal — e.g. 'Everyone runs 5k this week'…">
+            <select id="goal-type-select" aria-label="Goal type">
+              <option value="team">Team goal</option>
+              <option value="self">My goal</option>
+            </select>
+            <select id="goal-cadence-select" aria-label="Cadence">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+            <button type="button" id="add-goal-btn" class="btn btn-green"><i class="fa-solid fa-plus"></i>Add goal</button>
+          </div>
+          <div id="goals-list"><div class="empty-hint">Loading goals…</div></div>
+        </div>
+
+        <div id="tab-docs" class="panel" hidden>
+          <div id="docs-list-view">
+            <div class="commit-row">
+              <input type="text" id="new-doc-title" maxlength="120" placeholder="New doc title — e.g. 'Sprint plan'…">
+              <select id="new-doc-perm" aria-label="Team permission">
+                <option value="write">Team can edit</option>
+                <option value="read">Team can view only</option>
+              </select>
+              <button type="button" id="add-doc-btn" class="btn btn-green"><i class="fa-solid fa-plus"></i>New doc</button>
+            </div>
+            <div id="docs-list"><div class="empty-hint">Loading docs…</div></div>
+          </div>
+
+          <div id="doc-viewer" class="doc-viewer" hidden>
+            <div class="doc-viewer-bar">
+              <button type="button" id="doc-back" class="btn btn-quiet"><i class="fa-solid fa-arrow-left"></i>All docs</button>
+              <span id="doc-status" class="doc-status"></span>
+              <select id="doc-perm-select" aria-label="Team permission for this doc" hidden>
+                <option value="write">Team can edit</option>
+                <option value="read">Team can view only</option>
+              </select>
+              <span id="doc-perm-badge" class="perm-badge"></span>
+              <button type="button" id="doc-delete" class="btn btn-quiet" title="Delete doc" aria-label="Delete doc" hidden><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+            <input type="text" id="doc-title" class="doc-title" maxlength="120" placeholder="Untitled doc" aria-label="Doc title">
+            <div class="doc-meta" id="doc-meta"></div>
+            <div class="doc-notice" id="doc-notice" hidden>Someone else edited this doc. <button type="button" id="doc-reload">Load latest</button></div>
+            <div class="doc-toolbar" id="doc-toolbar" role="toolbar" aria-label="Text formatting">
+              <button type="button" data-doc-cmd="bold" aria-label="Bold"><b>B</b></button>
+              <button type="button" data-doc-cmd="italic" aria-label="Italic"><i>I</i></button>
+              <button type="button" data-doc-cmd="underline" aria-label="Underline"><u>U</u></button>
+              <button type="button" data-doc-cmd="insertUnorderedList" aria-label="Bulleted list">&bull;</button>
+              <button type="button" data-doc-cmd="formatBlock" data-value="blockquote" aria-label="Quote">&ldquo;</button>
+            </div>
+            <div id="doc-body" class="doc-body" contenteditable="false" role="textbox" aria-label="Doc body"></div>
+          </div>
+        </div>
+
+        <div id="tab-rewards" class="panel" hidden>
+          <div class="commit-row">
+            <input type="text" id="reward-title-input" maxlength="140" placeholder="Celebrate a win — e.g. 'Darshan finished the SDET course!'…">
+            <button type="button" id="add-reward-btn" class="btn btn-green"><i class="fa-solid fa-trophy"></i>Post win</button>
+          </div>
+          <div id="rewards-list"><div class="empty-hint">Loading wins…</div></div>
+        </div>
+
+        <div id="tab-members" class="panel" hidden>
+          <div id="members-list"><div class="empty-hint">Loading members…</div></div>
+        </div>
+      </div>
+
+      <!-- Team chat: fixed right-hand panel -->
+      <section class="wire panel" aria-label="Team chat">
+        <div class="wire-head"><span class="live"></span><span id="chat-team-name" class="wire-title">TEAM CHAT</span><span class="tag" id="chat-tag">SHARED · LIVE</span>
+          <button type="button" id="chat-clear-btn" class="wire-clear" title="Clear chat for everyone (owner only)" aria-label="Clear chat" hidden><i class="fa-regular fa-trash-can"></i></button>
+        </div>
+        <div class="wire-msgs" id="chat-messages"><div class="chat-empty">Sign in and pick a team to start chatting.</div></div>
+        <div class="typing-bar" id="typing-bar" aria-live="polite" hidden></div>
+        <div class="reply-bar" id="reply-bar" hidden>
+          <i class="fa-solid fa-reply"></i>
+          <div class="rb-text">
+            <div class="rb-name" id="reply-bar-name"></div>
+            <div class="rb-snip" id="reply-bar-text"></div>
+          </div>
+          <button type="button" class="rb-close" id="reply-bar-close" title="Cancel reply" aria-label="Cancel reply"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <form class="wire-input" id="chat-form">
+          <input type="text" id="chat-input" maxlength="300" placeholder="Message your team…" autocomplete="off">
+          <button type="submit" aria-label="Send message"><i class="fa-solid fa-paper-plane"></i></button>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <!-- Auth overlay (auth.js) -->
+  <div class="auth-overlay" id="auth-overlay" hidden>
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div>
+        <span class="auth-kicker">WELCOME TO INFINITE</span>
+        <h1 id="auth-title">Make this time yours.</h1>
+        <p id="auth-description">Sign in to keep your progress with you, or continue locally as a guest.</p>
+      </div>
+      <div class="auth-choice-buttons" id="auth-choice-buttons">
+        <button type="button" class="auth-button auth-button-primary" data-auth-choice="signin">Sign In</button>
+        <button type="button" class="auth-button" data-auth-choice="signup">Sign Up</button>
+        <button type="button" class="auth-button auth-button-quiet" data-auth-choice="guest">Continue as Guest</button>
+      </div>
+      <form class="auth-form" id="auth-form" hidden novalidate>
+        <div class="auth-name-field" id="auth-name-field" hidden>
+          <label for="auth-name">Name</label>
+          <input id="auth-name" name="name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <label for="auth-email">Email</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" required>
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" required>
+        <p class="auth-error" id="auth-error" role="alert"></p>
+        <button type="submit" class="auth-button auth-button-primary" id="auth-submit">Sign In</button>
+        <button type="button" class="auth-inline-toggle" id="auth-mode-toggle">Don't have an account? <span>Sign up</span></button>
+        <button type="button" class="auth-back-button" id="auth-back">Back</button>
+      </form>
+      <div class="auth-guest-confirm" id="auth-guest-confirm" hidden>
+        <div class="auth-guest-icon"><i class="fa-solid fa-hard-drive"></i></div>
+        <p class="auth-guest-message">As a guest, your goals, notes, and calendar are saved only in this browser on this device. AI chat and Team features require an account. Sign in or create an account to use them.</p>
+        <div class="auth-guest-name-field">
+          <label for="auth-guest-name">Name (optional)</label>
+          <input id="auth-guest-name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <button type="button" class="auth-button auth-button-primary" id="auth-guest-confirm-btn">Got it, continue as guest</button>
+        <button type="button" class="auth-button auth-button-quiet" id="auth-guest-signup-btn">Sign up instead</button>
+        <button type="button" class="auth-back-button" id="auth-guest-back">Back</button>
+      </div>
+      <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <!-- Password dialog (auth.js) -->
+  <dialog id="password-dialog" class="auth-password-dialog">
+    <form class="auth-form" id="password-form" novalidate>
+      <h2>Update password</h2>
+      <p class="auth-password-warning">Please save your password somewhere else too. This site does not offer password recovery.</p>
+      <label for="current-password">Current password</label>
+      <input id="current-password" type="password" autocomplete="current-password" required>
+      <label for="new-password">New password</label>
+      <input id="new-password" type="password" autocomplete="new-password" minlength="6" required>
+      <label for="confirm-password">Confirm new password</label>
+      <input id="confirm-password" type="password" autocomplete="new-password" minlength="6" required>
+      <p class="auth-error" id="password-error" role="alert"></p>
+      <button type="submit" class="auth-button auth-button-primary" id="password-submit">Update password</button>
+      <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
+    </form>
+  </dialog>
+
+  <!-- Big shared-doc popup (opened from a chat doc card) -->
+  <dialog id="doc-modal" class="doc-modal">
+    <div class="doc-modal-head">
+      <span class="doc-modal-kicker"><i class="fa-solid fa-file-lines"></i> SHARED DOC</span>
+      <button type="button" id="doc-modal-close" class="btn btn-quiet" aria-label="Close doc"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="doc-viewer-bar">
+      <span id="doc-modal-status" class="doc-status"></span>
+      <select id="doc-modal-perm-select" aria-label="Team permission for this doc" hidden>
+        <option value="write">Team can edit</option>
+        <option value="read">Team can view only</option>
+      </select>
+      <span id="doc-modal-perm-badge" class="perm-badge"></span>
+      <button type="button" id="doc-modal-delete" class="btn btn-quiet" title="Delete doc" aria-label="Delete doc" hidden><i class="fa-regular fa-trash-can"></i></button>
+    </div>
+    <input type="text" id="doc-modal-title" class="doc-title" maxlength="120" placeholder="Untitled doc" aria-label="Doc title">
+    <div class="doc-meta" id="doc-modal-meta"></div>
+    <div class="doc-notice" id="doc-modal-notice" hidden>Someone else edited this doc. <button type="button" id="doc-modal-reload">Load latest</button></div>
+    <div class="doc-toolbar" id="doc-modal-toolbar" role="toolbar" aria-label="Text formatting">
+      <button type="button" data-modal-doc-cmd="bold" aria-label="Bold"><b>B</b></button>
+      <button type="button" data-modal-doc-cmd="italic" aria-label="Italic"><i>I</i></button>
+      <button type="button" data-modal-doc-cmd="underline" aria-label="Underline"><u>U</u></button>
+      <button type="button" data-modal-doc-cmd="insertUnorderedList" aria-label="Bulleted list">&bull;</button>
+      <button type="button" data-modal-doc-cmd="formatBlock" data-value="blockquote" aria-label="Quote">&ldquo;</button>
+    </div>
+    <div id="doc-modal-body" class="doc-body" contenteditable="false" role="textbox" aria-label="Doc body"></div>
+  </dialog>
+
+  <script>
+    // Clock + user chip for this page (auth.js handles the account actions).
+    (function () {
+      function tickClock() {
+        const n = new Date();
+        document.getElementById('utc-clock').textContent =
+          String(n.getUTCHours()).padStart(2, '0') + ':' + String(n.getUTCMinutes()).padStart(2, '0') + ':' +
+          String(n.getUTCSeconds()).padStart(2, '0') + ' UTC';
+      }
+      setInterval(tickClock, 1000); tickClock();
+
+      function refreshUser() {
+        const name = localStorage.getItem('life_user_name') ||
+          (window.lifeIsShortUser && (window.lifeIsShortUser.displayName || window.lifeIsShortUser.email)) || 'Guest';
+        document.getElementById('user-name').textContent = name;
+        document.getElementById('user-initial').textContent = (name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+      }
+      refreshUser();
+      document.addEventListener('lifeIsShortAuthState', refreshUser);
+    })();
+  </script>
+</body>
+</html>

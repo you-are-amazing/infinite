@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Life Calendar - Infinite</title>
+  <meta name="description" content="Each square is one week of your life. See how many you've lived and how many remain.">
+  <link rel="icon" href="../deserve.png" type="image/png">
+  <link rel="stylesheet" href="../static/css/style.css?v=36">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="../static/js/sticky-notes.js?v=2" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js" defer></script>
+  <script src="../static/js/auth.js?v=10" defer></script>
+  <script src="../static/js/team-notify.js?v=4" defer></script>
+  <script src="../static/js/ai-chat.js?v=9" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="side-logo">
+      <img src="../deserve.png" alt="Infinite">
+      <div><div class="t1">Infinite</div><div class="t2">We deserve better</div></div>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item" href="../"><i class="fa-solid fa-house"></i><em>Overview</em></a>
+      <a class="nav-item active" href="./"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
+      <a class="nav-item" href="../notepad/"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
+      <a class="nav-item" href="../team/"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
+        <a class="nav-item" href="../contact/"><i class="fa-solid fa-envelope"></i><em>Connect</em></a>
+    </nav>
+    <div class="side-foot">
+      <div class="cad-mini">
+        <div class="lbl"><span>THIS YEAR</span><b id="side-day">DAY –/–</b></div>
+        <div class="track"><div class="fill" id="side-year-fill"></div></div>
+      </div>
+      <div class="sync-row"><span class="sync-dot"></span><span>WEEKS · 53-PER-YEAR GRID</span></div>
+      <div class="user-chip">
+        <div class="avatar" id="user-initial">?</div>
+        <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-wrap">
+    <div class="topbar">
+      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>LIFE CALENDAR</b></span>
+      <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
+      <div class="top-actions">
+        <div id="auth-account-actions" class="auth-account-actions" hidden></div>
+        <button type="button" class="sticky-bell-btn" id="sticky-bell-btn" title="Open sticky notes" aria-label="Open sticky notes">
+          <i class="fa-solid fa-thumbtack"></i>
+          <span class="sticky-bell-badge" id="sticky-bell-badge" hidden>0</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="page page-wide">
+      <div class="page-head">
+        <div>
+          <div class="kicker"><span class="dot"></span>WEEKLY VIEW · <span id="epoch-lbl">THIS YEAR</span></div>
+          <h1 class="page-title">Life Calendar</h1>
+          <div class="page-sub" id="today-line">—</div>
+        </div>
+        <div class="head-actions">
+          <a class="btn" href="../"><i class="fa-solid fa-arrow-left"></i>Back to Overview</a>
+        </div>
+      </div>
+
+      <p style="color:var(--muted); font-size:13px; max-width:640px; margin:-6px 0 18px;">
+        Each square represents one week of your life. Filled squares are weeks already lived —
+        <strong style="color:var(--green);" id="weeks-lived">0</strong> weeks lived out of
+        <strong style="color:var(--text);" id="total-weeks">0</strong> in your expected lifespan.
+      </p>
+
+      <div class="cal-controls">
+        <label for="birthdate">BIRTH DATE</label>
+        <input type="date" id="birthdate">
+        <label for="lifespan">EXPECTED LIFESPAN</label>
+        <input type="number" id="lifespan" min="1" max="120">
+        <button id="update-calendar" class="btn btn-green" type="button"><i class="fa-solid fa-rotate"></i>Update Calendar</button>
+      </div>
+
+      <div class="cal-grid-wrap">
+        <div class="cal-legend">
+          <span><i class="sw lived"></i>Weeks lived</span>
+          <span><i class="sw cur"></i>Current week</span>
+          <span><i class="sw rem"></i>Weeks ahead</span>
+        </div>
+        <div class="cal-grid" id="calendar-grid"></div>
+      </div>
+
+      <div class="cal-stats">
+        <div class="stat-card"><div class="stat-num" id="years-lived">0</div><div class="stat-lbl">YEARS LIVED</div></div>
+        <div class="stat-card"><div class="stat-num" id="years-remaining">0</div><div class="stat-lbl">YEARS REMAINING</div></div>
+        <div class="stat-card"><div class="stat-num" id="percentage-lived">0%</div><div class="stat-lbl">LIFE COMPLETED</div></div>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="sticky-notes-dialog" class="goal-dialog sticky-notes-dialog">
+    <form method="dialog">
+      <h3>Sticky Notes <span class="sticky-notes-subtitle">Important reminders</span></h3>
+      <div class="sticky-add-row"><input type="text" id="sticky-note-text" placeholder="Add an important task..." maxlength="200"><button type="button" class="dialog-btn primary" id="sticky-add-btn">Add</button></div>
+      <div id="sticky-notes-list" class="sticky-notes-list"></div>
+      <div class="sticky-glow-toggle-row"><span class="sticky-toggle-label">Glow reminder on header<span class="sticky-toggle-hint">Pulses while tasks are pending</span></span><label class="switch"><input type="checkbox" id="sticky-glow-toggle" checked aria-label="Enable glow reminder"><span class="switch-slider"></span></label></div>
+      <div class="dialog-buttons"><button type="button" class="dialog-btn secondary" id="sticky-notes-close">Close</button></div>
+    </form>
+  </dialog>
+  <div class="sticky-reminder-overlay" id="sticky-reminder-overlay" hidden>
+    <div class="sticky-reminder-modal" role="alertdialog" aria-modal="true">
+      <div class="sticky-reminder-icon"><i class="fa-solid fa-thumbtack"></i></div>
+      <h2>You have pending important tasks</h2>
+      <ul class="sticky-reminder-list" id="sticky-reminder-list"></ul>
+      <div class="sticky-reminder-actions"><button type="button" class="auth-button auth-button-primary" id="sticky-reminder-open">Open sticky notes</button><button type="button" class="auth-back-button" id="sticky-reminder-dismiss">Dismiss for now</button></div>
+    </div>
+  </div>
+
+  <div class="auth-overlay" id="auth-overlay" hidden>
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div>
+        <span class="auth-kicker">WELCOME TO INFINITE</span>
+        <h1 id="auth-title">Make this time yours.</h1>
+        <p id="auth-description">Sign in to keep your progress with you, or continue locally as a guest.</p>
+      </div>
+      <div class="auth-choice-buttons" id="auth-choice-buttons">
+        <button type="button" class="auth-button auth-button-primary" data-auth-choice="signin">Sign In</button>
+        <button type="button" class="auth-button" data-auth-choice="signup">Sign Up</button>
+        <button type="button" class="auth-button auth-button-quiet" data-auth-choice="guest">Continue as Guest</button>
+      </div>
+      <form class="auth-form" id="auth-form" hidden novalidate>
+        <div class="auth-name-field" id="auth-name-field" hidden>
+          <label for="auth-name">Name</label>
+          <input id="auth-name" name="name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <label for="auth-email">Email</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" required>
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" required>
+        <p class="auth-error" id="auth-error" role="alert"></p>
+        <button type="submit" class="auth-button auth-button-primary" id="auth-submit">Sign In</button>
+        <button type="button" class="auth-inline-toggle" id="auth-mode-toggle">Don't have an account? <span>Sign up</span></button>
+        <button type="button" class="auth-back-button" id="auth-back">Back</button>
+      </form>
+      <div class="auth-guest-confirm" id="auth-guest-confirm" hidden>
+        <div class="auth-guest-icon"><i class="fa-solid fa-hard-drive"></i></div>
+        <p class="auth-guest-message">As a guest, your goals, notes, and calendar are saved only in this browser on this device. AI chat and Team features require an account. Sign in or create an account to use them.</p>
+        <div class="auth-guest-name-field">
+          <label for="auth-guest-name">Name (optional)</label>
+          <input id="auth-guest-name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <button type="button" class="auth-button auth-button-primary" id="auth-guest-confirm-btn">Got it, continue as guest</button>
+        <button type="button" class="auth-button auth-button-quiet" id="auth-guest-signup-btn">Sign up instead</button>
+        <button type="button" class="auth-back-button" id="auth-guest-back">Back</button>
+      </div>
+      <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <script>
+    const birthdateInput = document.getElementById('birthdate');
+    const lifespanInput = document.getElementById('lifespan');
+    birthdateInput.value = localStorage.getItem('calendarBirthdate') || '1990-01-01';
+    lifespanInput.value = localStorage.getItem('calendarLifespan') || '80';
+
+    function tickClock() {
+      const n = new Date();
+      document.getElementById('utc-clock').textContent =
+        String(n.getUTCHours()).padStart(2,'0') + ':' + String(n.getUTCMinutes()).padStart(2,'0') + ':' + String(n.getUTCSeconds()).padStart(2,'0') + ' UTC';
+      document.getElementById('today-line').textContent = 'TODAY: ' +
+        n.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase();
+    }
+    setInterval(tickClock, 1000); tickClock();
+
+    // sidebar day counter
+    (function () {
+      const n = new Date();
+      const s = new Date(n.getFullYear(), 0, 1);
+      const e = new Date(n.getFullYear() + 1, 0, 1);
+      const doy = Math.floor((n - s) / 864e5) + 1;
+      const total = Math.round((e - s) / 864e5);
+      document.getElementById('side-day').textContent = 'DAY ' + doy + ' / ' + total;
+      document.getElementById('side-year-fill').style.width = (doy / total * 100) + '%';
+      document.getElementById('epoch-lbl').textContent = 'Q' + (Math.floor(n.getMonth() / 3) + 1) + ' ' + n.getFullYear();
+    })();
+
+    function refreshUser() {
+      const name = localStorage.getItem('life_user_name') || (window.lifeIsShortUser && (window.lifeIsShortUser.displayName || window.lifeIsShortUser.email)) || 'Guest';
+      document.getElementById('user-name').textContent = name;
+      document.getElementById('user-initial').textContent = (name || '?').trim().split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
+    }
+    refreshUser();
+    document.addEventListener('lifeIsShortAuthState', refreshUser);
+
+    function generateCalendar() {
+      const birth = new Date(birthdateInput.value + 'T00:00:00');
+      const lifespan = Number(lifespanInput.value);
+      const now = new Date();
+      const grid = document.getElementById('calendar-grid');
+      grid.innerHTML = '';
+      let livedWeeks = 0;
+
+      const birthYear = birth.getFullYear();
+      for (let age = 0; age < lifespan; age++) {
+        const calendarYear = birthYear + age;
+        const start = new Date(calendarYear, 0, 1);
+        const end = new Date(calendarYear + 1, 0, 1);
+        const row = document.createElement('div');
+        row.className = 'cal-year';
+
+        const yl = document.createElement('span');
+        yl.className = 'yl'; yl.textContent = calendarYear;
+        row.appendChild(yl);
+
+        const weeks = Math.round((end - start) / 604800000);
+        for (let week = 0; week < weeks; week++) {
+          const ws = new Date(start); ws.setDate(start.getDate() + week * 7);
+          const we = new Date(ws); we.setDate(ws.getDate() + 7);
+          const sq = document.createElement('div');
+          sq.className = 'cal-week';
+          if (we <= birth) {
+            sq.style.visibility = 'hidden';
+          } else if (we <= now) { sq.classList.add('lived'); livedWeeks++; }
+          else if (ws <= now && now < we) { sq.classList.add('cur'); livedWeeks++; }
+          row.appendChild(sq);
+        }
+
+        const ya = document.createElement('span');
+        ya.className = 'ya'; ya.textContent = 'AGE ' + age;
+        row.appendChild(ya);
+        grid.appendChild(row);
+      }
+
+      const lifeEnd = new Date(birth); lifeEnd.setFullYear(birth.getFullYear() + lifespan);
+      const totalWeeks = Math.round((lifeEnd - birth) / 604800000);
+      const yearsLived = Math.min(lifespan, Math.floor(livedWeeks / 52.14));
+      document.getElementById('weeks-lived').textContent = livedWeeks.toLocaleString();
+      document.getElementById('total-weeks').textContent = totalWeeks.toLocaleString();
+      document.getElementById('years-lived').textContent = yearsLived;
+      document.getElementById('years-remaining').textContent = Math.max(0, lifespan - yearsLived);
+      document.getElementById('percentage-lived').textContent = Math.min(100, livedWeeks / totalWeeks * 100).toFixed(1) + '%';
+    }
+
+    document.getElementById('update-calendar').addEventListener('click', () => {
+      localStorage.setItem('calendarBirthdate', birthdateInput.value);
+      localStorage.setItem('calendarLifespan', lifespanInput.value);
+      generateCalendar();
+    });
+
+    generateCalendar();
+    document.addEventListener('lifeIsShortDataReady', () => {
+      birthdateInput.value = localStorage.getItem('calendarBirthdate') || '1990-01-01';
+      lifespanInput.value = localStorage.getItem('calendarLifespan') || '80';
+      generateCalendar();
+    });
+  </script>
+
+  <dialog id="password-dialog" class="auth-password-dialog">
+    <form class="auth-form" id="password-form" novalidate>
+      <h2>Update password</h2>
+      <p class="auth-password-warning">Please save your password somewhere else too. This site does not offer password recovery.</p>
+      <label for="current-password">Current password</label>
+      <input id="current-password" type="password" autocomplete="current-password" required>
+      <label for="new-password">New password</label>
+      <input id="new-password" type="password" autocomplete="new-password" minlength="6" required>
+      <label for="confirm-password">Confirm new password</label>
+      <input id="confirm-password" type="password" autocomplete="new-password" minlength="6" required>
+      <p class="auth-error" id="password-error" role="alert"></p>
+      <button type="submit" class="auth-button auth-button-primary" id="password-submit">Update password</button>
+      <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
+    </form>
+  </dialog>
+</body>
+</html>

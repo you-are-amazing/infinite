@@ -1,0 +1,19 @@
+node_modules/
+package-lock.json
+.DS_Store
+.firebase/
+.vscode/
+firebase-debug.log
+firebase-debug.*.log
+
+# Cloudflare Worker: your own account name, worker URL and Firebase key live here.
+# wrangler.example.toml is the committed template.
+ai-worker/wrangler.toml
+.wrangler/
+
+# local agent/editor config, not part of the site
+.kilo/
+.kilocode/
+
+# Firestore rules with the real admin address: kept off GitHub so the account stays out of the repo.
+firestore.rules.deploy

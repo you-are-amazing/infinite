@@ -1,0 +1,12 @@
+{
+  "name": "infinite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Infinite - a static site with shared team docs. Only the test harness needs Node; the site itself is plain HTML/CSS/JS on GitHub Pages.",
+  "scripts": {
+    "test": "node tests/docs.test.js && node tests/notepad.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}

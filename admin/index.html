@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Inbox - Infinite</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="../deserve.png" type="image/png">
+  <link rel="stylesheet" href="../static/css/style.css?v=36">
+  <link rel="stylesheet" href="../static/css/contact.css?v=6">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="../static/js/sticky-notes.js?v=2" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js" defer></script>
+  <script src="../static/js/auth.js?v=10" defer></script>
+  <script src="../static/js/team-notify.js?v=4" defer></script>
+  <script src="../static/js/ai-chat.js?v=9" defer></script>
+  <script src="../static/js/dev-key.js?v=2" defer></script>
+  <script src="../static/js/admin.js?v=4" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="side-logo">
+      <img src="../deserve.png" alt="Infinite">
+      <div><div class="t1">Infinite</div><div class="t2">We deserve better</div></div>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item" href="../"><i class="fa-solid fa-house"></i><em>Overview</em></a>
+      <a class="nav-item" href="../calendar/"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
+      <a class="nav-item" href="../notepad/"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
+      <a class="nav-item" href="../team/"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
+      <a class="nav-item" href="../contact/"><i class="fa-solid fa-envelope"></i><em>Connect</em></a>
+      <a class="nav-item active" id="nav-admin" href="./" hidden><i class="fa-solid fa-inbox"></i><em>Admin Inbox</em></a>
+    </nav>
+    <div class="side-foot">
+      <div class="sync-row"><span class="sync-dot"></span><span>PRIVATE · ADMIN</span></div>
+      <div class="user-chip">
+        <div class="avatar" id="user-initial">?</div>
+        <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-wrap">
+    <div class="topbar">
+      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>ADMIN INBOX</b></span>
+      <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
+      <div class="top-actions">
+        <div id="auth-account-actions" class="auth-account-actions" hidden></div>
+        <button type="button" class="sticky-bell-btn" id="sticky-bell-btn" title="Open sticky notes" aria-label="Open sticky notes">
+          <i class="fa-solid fa-thumbtack"></i>
+          <span class="sticky-bell-badge" id="sticky-bell-badge" hidden>0</span>
+        </button>
+      </div>
+    </div>
+
+
+    <div class="page page-wide">
+      <div class="page-head">
+        <div>
+          <div class="kicker"><span class="dot"></span>ADMIN · PRIVATE TO THE DEVELOPER</div>
+          <h1 class="page-title">Inbox</h1>
+          <div class="page-sub">EVERY MESSAGE SENT THROUGH THE CONNECT FORM · REPLY FROM YOUR OWN MAIL APP</div>
+        </div>
+      </div>
+
+      <section class="cn-card ad-lock" id="ad-lock" aria-live="polite">
+        <i class="fa-solid fa-lock"></i>
+        <p id="ad-lock-msg">Checking your account…</p>
+      </section>
+
+      <section class="cn-inbox" id="ad-inbox" hidden aria-label="All messages">
+        <div class="cn-inbox-head">
+          <div class="cn-inbox-t"><i class="fa-solid fa-inbox"></i>ALL MESSAGES</div>
+          <span class="cn-inbox-n" id="ad-count">0</span>
+        </div>
+        <div class="ad-bar">
+          <button type="button" class="ad-tab on" data-f="all">ALL</button>
+          <button type="button" class="ad-tab" data-f="unread">UNREAD <span id="ad-unread">0</span></button>
+          <button type="button" class="ad-tab" id="ad-chkey"><i class="fa-solid fa-key"></i> CHANGE KEY</button>
+          <button type="button" class="ad-tab" id="ad-relock"><i class="fa-solid fa-lock"></i> LOCK</button>
+          <input type="search" class="ad-search" id="ad-search" placeholder="Search name, email or text…" aria-label="Search messages">
+        </div>
+        <div class="cn-inbox-list" id="ad-list"></div>
+        <div class="cn-inbox-empty" id="ad-empty" hidden>No messages to show.</div>
+      </section>
+    </div>
+  </div>
+
+  <dialog id="key-dialog" class="cn-gate" aria-labelledby="key-title">
+    <form id="key-form" novalidate>
+      <div class="cn-gate-icon"><i class="fa-solid fa-key"></i></div>
+      <h3 id="key-title">Change your key</h3>
+      <input type="password" id="key-old" autocomplete="off" placeholder="Current key">
+      <input type="password" id="key-new" autocomplete="off" placeholder="New key (min 6 characters)">
+      <input type="password" id="key-new2" autocomplete="off" placeholder="Repeat the new key">
+      <div class="cn-gate-err" id="key-err" role="alert"></div>
+      <div class="cn-gate-actions">
+        <button type="button" class="btn" id="key-cancel">Cancel</button>
+        <button type="submit" class="btn btn-green" id="key-save">Save key</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="sticky-notes-dialog" class="goal-dialog sticky-notes-dialog">
+    <form method="dialog">
+      <h3>Sticky Notes <span class="sticky-notes-subtitle">Important reminders</span></h3>
+      <div class="sticky-add-row"><input type="text" id="sticky-note-text" placeholder="Add an important task..." maxlength="200"><button type="button" class="dialog-btn primary" id="sticky-add-btn">Add</button></div>
+      <div id="sticky-notes-list" class="sticky-notes-list"></div>
+      <div class="sticky-glow-toggle-row"><span class="sticky-toggle-label">Glow reminder on header<span class="sticky-toggle-hint">Pulses while tasks are pending</span></span><label class="switch"><input type="checkbox" id="sticky-glow-toggle" checked aria-label="Enable glow reminder"><span class="switch-slider"></span></label></div>
+      <div class="dialog-buttons"><button type="button" class="dialog-btn secondary" id="sticky-notes-close">Close</button></div>
+    </form>
+  </dialog>
+  <div class="sticky-reminder-overlay" id="sticky-reminder-overlay" hidden>
+    <div class="sticky-reminder-modal" role="alertdialog" aria-modal="true">
+      <div class="sticky-reminder-icon"><i class="fa-solid fa-thumbtack"></i></div>
+      <h2>You have pending important tasks</h2>
+      <ul class="sticky-reminder-list" id="sticky-reminder-list"></ul>
+      <div class="sticky-reminder-actions"><button type="button" class="auth-button auth-button-primary" id="sticky-reminder-open">Open sticky notes</button><button type="button" class="auth-back-button" id="sticky-reminder-dismiss">Dismiss for now</button></div>
+    </div>
+  </div>
+
+  <div class="auth-overlay" id="auth-overlay" hidden>
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div>
+        <span class="auth-kicker">WELCOME TO INFINITE</span>
+        <h1 id="auth-title">Make this time yours.</h1>
+        <p id="auth-description">Sign in to keep your progress with you, or continue locally as a guest.</p>
+      </div>
+      <div class="auth-choice-buttons" id="auth-choice-buttons">
+        <button type="button" class="auth-button auth-button-primary" data-auth-choice="signin">Sign In</button>
+        <button type="button" class="auth-button" data-auth-choice="signup">Sign Up</button>
+        <button type="button" class="auth-button auth-button-quiet" data-auth-choice="guest">Continue as Guest</button>
+      </div>
+      <form class="auth-form" id="auth-form" hidden novalidate>
+        <div class="auth-name-field" id="auth-name-field" hidden>
+          <label for="auth-name">Name</label>
+          <input id="auth-name" name="name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <label for="auth-email">Email</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" required>
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" required>
+        <p class="auth-error" id="auth-error" role="alert"></p>
+        <button type="submit" class="auth-button auth-button-primary" id="auth-submit">Sign In</button>
+        <button type="button" class="auth-inline-toggle" id="auth-mode-toggle">Don't have an account? <span>Sign up</span></button>
+        <button type="button" class="auth-back-button" id="auth-back">Back</button>
+      </form>
+      <div class="auth-guest-confirm" id="auth-guest-confirm" hidden>
+        <div class="auth-guest-icon"><i class="fa-solid fa-hard-drive"></i></div>
+        <p class="auth-guest-message">As a guest, your goals, notes, and calendar are saved only in this browser on this device. AI chat and Team features require an account. Sign in or create an account to use them.</p>
+        <div class="auth-guest-name-field">
+          <label for="auth-guest-name">Name (optional)</label>
+          <input id="auth-guest-name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <button type="button" class="auth-button auth-button-primary" id="auth-guest-confirm-btn">Got it, continue as guest</button>
+        <button type="button" class="auth-button auth-button-quiet" id="auth-guest-signup-btn">Sign up instead</button>
+        <button type="button" class="auth-back-button" id="auth-guest-back">Back</button>
+      </div>
+      <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <dialog id="password-dialog" class="auth-password-dialog">
+    <form class="auth-form" id="password-form" novalidate>
+      <h2>Update password</h2>
+      <p class="auth-password-warning">Please save your password somewhere else too. This site does not offer password recovery.</p>
+      <label for="current-password">Current password</label>
+      <input id="current-password" type="password" autocomplete="current-password" required>
+      <label for="new-password">New password</label>
+      <input id="new-password" type="password" autocomplete="new-password" minlength="6" required>
+      <label for="confirm-password">Confirm new password</label>
+      <input id="confirm-password" type="password" autocomplete="new-password" minlength="6" required>
+      <p class="auth-error" id="password-error" role="alert"></p>
+      <button type="submit" class="auth-button auth-button-primary" id="password-submit">Update password</button>
+      <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
+    </form>
+  </dialog>
+</body>
+</html>

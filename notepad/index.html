@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Notepad &amp; Docs - Infinite</title>
+  <meta name="description" content="Write, organize, and revisit your personal notes.">
+  <link rel="icon" href="../deserve.png" type="image/png">
+  <link rel="stylesheet" href="../static/css/style.css?v=36">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js" defer></script>
+  <script src="../static/js/auth.js?v=10" defer></script>
+  <script src="../static/js/team-notify.js?v=4" defer></script>
+  <script src="../static/js/ai-chat.js?v=9" defer></script>
+  <!-- Shared doc helpers (sanitizer + "who wrote which part" stamps). Deliberately
+       without defer: the inline page script below runs while the page is parsing. -->
+  <script src="../static/js/doc-attrib.js?v=2"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="side-logo">
+      <img src="../deserve.png" alt="Infinite">
+      <div><div class="t1">Infinite</div><div class="t2">We deserve better</div></div>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item" href="../"><i class="fa-solid fa-house"></i><em>Overview</em></a>
+      <a class="nav-item" href="../calendar/"><i class="fa-solid fa-calendar-week"></i><em>Life Calendar</em></a>
+      <a class="nav-item active" href="./"><i class="fa-solid fa-book"></i><em>Notepad &amp; Docs</em></a>
+      <a class="nav-item" href="../team/"><i class="fa-solid fa-users"></i><em>Team Goals</em></a>
+        <a class="nav-item" href="../contact/"><i class="fa-solid fa-envelope"></i><em>Connect</em></a>
+    </nav>
+    <div class="side-foot">
+      <div class="sync-row"><span class="sync-dot"></span><span id="np-sync">SAVED LOCALLY</span></div>
+      <div class="user-chip">
+        <div class="avatar" id="user-initial">?</div>
+        <div><div class="nm" id="user-name">Guest</div><div class="rl">MEMBER</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-wrap">
+    <div class="topbar">
+      <span class="crumb">INFINITE &nbsp;›&nbsp; <b>NOTEPAD &amp; DOCS</b></span>
+      <span class="clock-pill"><i class="fa-regular fa-clock"></i><span id="utc-clock">--:--:-- UTC</span></span>
+      <div class="top-actions">
+        <div id="auth-account-actions" class="auth-account-actions" hidden></div>
+      </div>
+    </div>
+
+    <div class="np-shell">
+      <aside class="np-side">
+        <div class="pad">
+          <button class="np-new" id="new-note" type="button">+ New note</button>
+          <div class="np-count"><span>YOUR NOTES</span><span id="note-count">0</span></div>
+          <div class="np-list" id="note-list" aria-label="Saved notes"></div>
+          <div class="np-team-wrap" id="team-docs-wrap" hidden>
+            <div class="np-count"><span>TEAM DOCS</span><span id="team-doc-count">0</span></div>
+            <div class="np-list np-team-list" id="team-doc-list" aria-label="Shared team docs"></div>
+            <div class="np-team-actions"><button type="button" id="np-join-team"><i class="fa-solid fa-right-to-bracket"></i> Join team</button></div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="np-main">
+        <section class="np-empty" id="np-empty" aria-live="polite">
+          <div class="np-empty-icon"><i class="fa-regular fa-note-sticky"></i></div>
+          <h2>No notes yet</h2>
+          <p>Press <b>+ New note</b> to start writing. Nothing is created until you do.</p>
+          <button class="np-new np-empty-btn" id="new-note-empty" type="button">+ New note</button>
+        </section>
+        <section class="np-editor" id="np-editor" aria-label="Note editor" hidden>
+          <div class="np-team-banner" id="note-team-banner" hidden>
+            <i class="fa-solid fa-user-pen"></i>
+            <div class="ntb-text">
+              <b id="ntb-title">A teammate changed this note</b>
+              <span id="ntb-sub"></span>
+            </div>
+            <button type="button" id="ntb-open" class="ntb-btn">Open team doc</button>
+            <button type="button" id="ntb-dismiss" class="ntb-close" title="Dismiss" aria-label="Dismiss"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="td-banner" id="td-banner" hidden>
+            <i class="fa-solid fa-users"></i>
+            <span id="td-info"></span>
+            <select id="td-perm" aria-label="Team permission" hidden>
+              <option value="write">Team can edit</option>
+              <option value="read">Team can view only</option>
+            </select>
+            <button type="button" class="td-reload" id="td-reload" hidden>Someone edited — load latest</button>
+            <span class="td-status" id="td-status"></span>
+          </div>
+          <input id="note-title" type="text" maxlength="120" placeholder="Untitled note" aria-label="Note title">
+          <div id="note-date"></div>
+          <div class="np-tools" role="toolbar" aria-label="Text formatting">
+            <button type="button" data-command="bold" aria-label="Bold">B</button>
+            <button type="button" data-command="italic" aria-label="Italic"><i>I</i></button>
+            <button type="button" data-command="underline" aria-label="Underline"><u>U</u></button>
+            <button type="button" data-command="insertUnorderedList" aria-label="Bulleted list">&bull;</button>
+            <button type="button" data-command="formatBlock" data-value="blockquote" aria-label="Quote">&ldquo;</button>
+            <button type="button" id="highlight-btn" aria-label="Highlight" style="width:auto; padding:0 12px;">Highlight</button>
+            <button type="button" id="share-team-btn" aria-label="Share with team" style="width:auto; padding:0 12px; margin-left:auto;" hidden><i class="fa-solid fa-share-nodes" style="margin-right:6px;"></i>Share with team</button>
+          </div>
+          <article id="note-body" contenteditable="false" role="textbox" aria-label="Note body"></article>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="auth-overlay" id="auth-overlay" hidden>
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div>
+        <span class="auth-kicker">WELCOME TO INFINITE</span>
+        <h1 id="auth-title">Make this time yours.</h1>
+        <p id="auth-description">Sign in to keep your progress with you, or continue locally as a guest.</p>
+      </div>
+      <div class="auth-choice-buttons" id="auth-choice-buttons">
+        <button type="button" class="auth-button auth-button-primary" data-auth-choice="signin">Sign In</button>
+        <button type="button" class="auth-button" data-auth-choice="signup">Sign Up</button>
+        <button type="button" class="auth-button auth-button-quiet" data-auth-choice="guest">Continue as Guest</button>
+      </div>
+      <form class="auth-form" id="auth-form" hidden novalidate>
+        <div class="auth-name-field" id="auth-name-field" hidden>
+          <label for="auth-name">Name</label>
+          <input id="auth-name" name="name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <label for="auth-email">Email</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" required>
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" required>
+        <p class="auth-error" id="auth-error" role="alert"></p>
+        <button type="submit" class="auth-button auth-button-primary" id="auth-submit">Sign In</button>
+        <button type="button" class="auth-inline-toggle" id="auth-mode-toggle">Don't have an account? <span>Sign up</span></button>
+        <button type="button" class="auth-back-button" id="auth-back">Back</button>
+      </form>
+      <div class="auth-guest-confirm" id="auth-guest-confirm" hidden>
+        <div class="auth-guest-icon"><i class="fa-solid fa-hard-drive"></i></div>
+        <p class="auth-guest-message">As a guest, your goals, notes, and calendar are saved only in this browser on this device. AI chat and Team features require an account. Sign in or create an account to use them.</p>
+        <div class="auth-guest-name-field">
+          <label for="auth-guest-name">Name (optional)</label>
+          <input id="auth-guest-name" type="text" autocomplete="name" placeholder="What should we call you?">
+        </div>
+        <button type="button" class="auth-button auth-button-primary" id="auth-guest-confirm-btn">Got it, continue as guest</button>
+        <button type="button" class="auth-button auth-button-quiet" id="auth-guest-signup-btn">Sign up instead</button>
+        <button type="button" class="auth-back-button" id="auth-guest-back">Back</button>
+      </div>
+      <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <dialog id="share-dialog" class="goal-dialog share-dialog">
+    <form method="dialog" id="share-form" onsubmit="return false">
+      <h3>Share with team</h3>
+      <p id="share-note-name" class="share-hint"></p>
+      <label for="share-team-select">TEAM</label>
+      <select id="share-team-select"></select>
+      <label for="share-perm">TEAM MEMBERS CAN</label>
+      <select id="share-perm">
+        <option value="write">Edit (read &amp; write)</option>
+        <option value="read">View only (read)</option>
+      </select>
+      <label for="share-msg">MESSAGE (OPTIONAL)</label>
+      <input id="share-msg" type="text" maxlength="200" placeholder="Add a message for the team chat...">
+      <p id="share-hint" class="share-hint"></p>
+      <details id="share-join-details">
+        <summary>No team yet? Join or create one</summary>
+        <div class="share-row"><input id="share-join-code" type="text" maxlength="12" placeholder="Invite code" autocomplete="off"><button type="button" id="share-join-btn" class="dialog-btn secondary">Join</button></div>
+        <div class="share-row"><input id="share-create-name" type="text" maxlength="60" placeholder="New team name" autocomplete="off"><button type="button" id="share-create-btn" class="dialog-btn secondary">Create</button></div>
+      </details>
+      <p id="share-status" class="share-status" role="status"></p>
+      <div class="dialog-buttons">
+        <button type="button" id="share-cancel" class="dialog-btn secondary">Cancel</button>
+        <button type="button" id="share-send" class="dialog-btn primary">Share to team chat &amp; docs</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    (() => {
+      const storageKey = 'life_notes';
+      const linkKey = 'life_note_links';
+      const DOC_MAX = window.InfiniteDocs.DOC_MAX;
+      const $ = (id) => document.getElementById(id);
+      const title = $('note-title');
+      const body = $('note-body');
+      const list = $('note-list');
+      const count = $('note-count');
+      const date = $('note-date');
+      const editorEl = $('np-editor');
+      const emptyEl = $('np-empty');
+      let notes = loadNotes();
+      let activeId = notes[0]?.id || null;
+
+      // ----- team state (only used when signed in) -----
+      let teamMode = null;            // { teamId, id } while a shared team doc is open
+      let userTeams = {};             // teamId -> { name, ownerId, inviteCode }
+      let teamDocsMap = {};           // teamId -> QueryDocumentSnapshot[]
+      let teamUnsubs = {};            // teamId -> unsubscribe
+      let userTeamsUnsub = null;
+      let tdSaveTimer = null;
+      let notePushTimer = null;          // debounce for pushing local note edits to the shared doc
+      let tdLoadedAt = 0;
+      let pendingSelectTeam = null;
+      let noteLinks = loadNoteLinks();   // noteId -> { teamId, docId, at } — the docs I sent my notes to
+      let appliedStamps = {};            // teamId + '/' + docId -> ms of the newest version already pulled into the note
+      let bannerNoteId = null;           // note the "teammate changed this" banner is currently showing
+
+      function tickClock() {
+        const n = new Date();
+        $('utc-clock').textContent =
+          String(n.getUTCHours()).padStart(2,'0') + ':' + String(n.getUTCMinutes()).padStart(2,'0') + ':' + String(n.getUTCSeconds()).padStart(2,'0') + ' UTC';
+      }
+      setInterval(tickClock, 1000); tickClock();
+
+      const me = () => window.lifeIsShortUser || null;
+      const dbase = () => window.lifeIsShortDb || null;
+      function myName() {
+        const u = me();
+        return (u && (u.displayName || u.email)) || localStorage.getItem('life_user_name') || 'Someone';
+      }
+
+      function refreshUser() {
+        const name = localStorage.getItem('life_user_name') || (window.lifeIsShortUser && (window.lifeIsShortUser.displayName || window.lifeIsShortUser.email)) || 'Guest';
+        $('user-name').textContent = name;
+        $('user-initial').textContent = (name || '?').trim().split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
+        const mode = localStorage.getItem('lifeIsShort_mode');
+        $('np-sync').textContent = mode === 'account' ? 'SYNCED · CLOUD' : 'SAVED LOCALLY · THIS DEVICE';
+        syncTeamUi();
+      }
+      document.addEventListener('lifeIsShortAuthState', refreshUser);
+
+      // ----- helpers -----
+      // Anything coming out of a shared doc is somebody else's HTML, so it always goes
+      // through the shared whitelist (only the authorship stamps survive).
+      function cleanDocHtml(html) { return window.InfiniteDocs.clean(html); }
+      const tsMs = (ts) => (ts && ts.toMillis ? ts.toMillis() : 0);
+      const permLabel = (p) => (p === 'write' ? 'Can edit' : 'View only');
+      // Every "may I touch this doc" question goes through the one shared ACL in
+      // doc-attrib.js, so this page and the Team page can never disagree about it.
+      const docAcl = (d, teamId) => {
+        const u = me();
+        const t = userTeams[teamId || (teamMode && teamMode.teamId)];
+        // A doc that is not in a team we belong to is locked, not editable.
+        return Docs.acl(d, u && u.uid, t && t.ownerId, !!t);
+      };
+      const canEditDoc = (d) => docAcl(d).canEdit;
+      const canDeleteDoc = (teamId, d) => docAcl(d, teamId).canDelete;
+      const toolButtons = () => document.querySelectorAll('.np-tools button:not(#share-team-btn)');
+
+      // ---------- who wrote which part + who may write ----------
+      const Docs = window.InfiniteDocs;
+      const isDocOwner = (d) => docAcl(d).owner;
+      // A read-only doc is LOCKED: the person who shared it is the only one who can type,
+      // and the only one who can switch it back to "can edit". The /docs rules in
+      // README.md repeat both of these server side, so changing them in the page does not help.
+      const docLockedForMe = (d) => docAcl(d).locked;
+      function escapeTeamText(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+      }
+      function tagMyContribution(html, baseHtml, ownerId) {
+        const u = me();
+        return Docs.attribute(html, baseHtml || '', { id: u ? u.uid : '', name: myName() }, { id: ownerId || '', name: 'Someone' });
+      }
+      function writtenByLabel(d) {
+        const who = Docs.names((d && d.body) || '', (d && d.ownerId) || '');
+        if (!who.length) return '';
+        return ' · added by ' + escapeTeamText(who.slice(0, 3).join(', ')) + (who.length > 3 ? ' +' + (who.length - 3) + ' more' : '');
+      }
+
+      function loadNotes() {
+        try {
+          const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+          if (!Array.isArray(value)) return [];
+          return value.map((n) => ({
+            id: n && n.id ? n.id : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            title: (n && typeof n.title === 'string') ? n.title : '',
+            body: (n && typeof n.body === 'string') ? n.body : '',
+            updatedAt: (n && n.updatedAt) ? n.updatedAt : new Date().toISOString(),
+            teamInfo: (n && typeof n.teamInfo === 'string') ? n.teamInfo : null,
+            teamBy: (n && typeof n.teamBy === 'string') ? n.teamBy : null,
+            teamSyncAt: (n && n.teamSyncAt) ? n.teamSyncAt : 0,
+          }));
+        } catch (error) { return []; }
+      }
+
+      function activeNote() { return notes.find((note) => note.id === activeId); }
+
+      // Remembers which shared doc each of my notes was sent to, so teammate edits can come back into the note.
+      function loadNoteLinks() {
+        try {
+          const raw = JSON.parse(localStorage.getItem(linkKey) || '{}');
+          return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+        } catch (error) { return {}; }
+      }
+      function saveNoteLinks() {
+        try { localStorage.setItem(linkKey, JSON.stringify(noteLinks)); } catch (error) { /* storage full/blocked */ }
+      }
+      function linkFor(teamId, docId) { return noteLinks[teamId + '/' + docId] || null; }
+      function setNoteLink(teamId, docId, noteId) {
+        noteLinks[teamId + '/' + docId] = { noteId, teamId, docId, at: Date.now() };
+        saveNoteLinks();
+      }
+      function clearNoteLink(teamId, docId) {
+        delete noteLinks[teamId + '/' + docId];
+        saveNoteLinks();
+      }
+      const stampKey = (teamId, docId) => teamId + '/' + docId;
+
+      function saveNotes() {
+        localStorage.setItem(storageKey, JSON.stringify(notes));
+        renderList();
+      }
+
+      // Show the editor only when a real note is open; otherwise show the "No notes yet" screen.
+      function showEditor(on) {
+        editorEl.hidden = !on;
+        emptyEl.hidden = on;
+      }
+
+      // ----- local <-> team editing mode -----
+      // The body ships contentEditable="false" so a shared doc is never editable before a
+      // snapshot has proved you may write. This is the only place that hands the body back,
+      // so it must ALWAYS run the unlock — even when we were never in a team doc, which is
+      // the normal case for a personal note. Skipping the unlock here (as an early
+      // "if (!teamMode) return" would) leaves your own notes read only.
+      function leaveTeamMode() {
+        if (teamMode) flushTeamSave();
+        teamMode = null;
+        title.readOnly = false;
+        body.setAttribute('aria-readonly', 'false');
+        body.contentEditable = 'true';
+        body.classList.remove('doc-locked');
+        toolButtons().forEach((b) => { b.disabled = false; });
+        $('td-banner').hidden = true;
+        $('td-reload').hidden = true;
+        renderTeamDocs();
+      }
+
+      function openNote(id) {
+        leaveTeamMode();
+        activeId = id;
+        if (bannerNoteId !== id) hideTeamBanner();
+        const note = activeNote();
+        if (!note) { showEditor(false); return; }
+        showEditor(true);
+        title.value = note.title || '';
+        body.innerHTML = note.body || '';
+        date.textContent = `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}`;
+        syncTeamUi();
+        renderList();
+      }
+
+      function createNote() {
+        leaveTeamMode();
+        const now = new Date().toISOString();
+        const note = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, title: '', body: '', updatedAt: now };
+        notes.unshift(note);
+        activeId = note.id;
+        saveNotes();
+        openNote(note.id);
+        title.focus();
+      }
+
+      function updateNote() {
+        if (teamMode) { teamDocEdited(); return; }
+        const note = activeNote();
+        if (!note) return;
+        note.title = title.value;
+        note.body = body.innerHTML;
+        note.updatedAt = new Date().toISOString();
+        date.textContent = `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}`;
+        saveNotes();
+        notePushedToTeam();
+      }
+
+      // If this note was shared with a team, my local edits go to the team doc too, so the
+      // round trip works in both directions (theirs -> my note, mine -> their doc).
+      function notePushedToTeam() {
+        clearTimeout(notePushTimer);
+        notePushTimer = setTimeout(() => { notePushTimer = null; pushNoteToTeamDoc(); }, 900);
+      }
+
+      function pushNoteToTeamDoc() {
+        const u = me(), d = dbase();
+        const note = activeNote();
+        if (!u || !d || !note || teamMode) return;
+        const key = Object.keys(noteLinks).find((k) => noteLinks[k].noteId === note.id);
+        if (!key) return;
+        const link = noteLinks[key];
+        const doc = (teamDocsMap[link.teamId] || []).find((x) => x.id === link.docId);
+        if (!doc || !canEditDoc(doc.data())) return;
+        const base = doc.data();
+        // same rule as everywhere: what I added gets my name, what is unchanged keeps its author
+        const html = tagMyContribution(cleanDocHtml(note.body), base.body, base.ownerId);
+        if (html.length > DOC_MAX) { setTdStatus('Note is too large to sync (limit ≈ 200 KB)', true); return; }
+        doc.ref.update({
+          title: (note.title || '').trim().slice(0, 120) || 'Untitled note',
+          body: html,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedBy: u.uid,
+          updatedByName: myName()
+        }).then(() => {
+          appliedStamps[stampKey(link.teamId, link.docId)] = Date.now();
+          note.teamInfo = null;
+          note.teamBy = null;
+          saveNotes();
+        }).catch((err) => setTdStatus('Could not sync to the team doc: ' + ((err && err.message) || err), true));
+      }
+
+      function deleteNote(id) {
+        if (!window.confirm('Delete this note?')) return;
+        notes = notes.filter((note) => note.id !== id);
+        Object.keys(noteLinks).forEach((k) => { if (noteLinks[k].noteId === id) delete noteLinks[k]; });
+        saveNoteLinks();
+        if (bannerNoteId === id) hideTeamBanner();
+        if (!teamMode && activeId === id) {
+          activeId = notes[0]?.id || null;
+          if (activeId) { saveNotes(); openNote(activeId); }
+          else { saveNotes(); title.value = ''; body.innerHTML = ''; date.textContent = ''; showEditor(false); renderList(); syncTeamUi(); }
+        } else { if (activeId === id) activeId = null; saveNotes(); }
+      }
+
+      function closestHighlight(node) {
+        while (node && node !== body) {
+          if (node.nodeType === 1 && node.tagName === 'MARK' && node.classList.contains('note-highlight')) return node;
+          node = node.parentNode;
+        }
+        return null;
+      }
+
+      function unwrapMark(mark) {
+        const parent = mark.parentNode;
+        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+        parent.removeChild(mark);
+      }
+
+      function toggleHighlight() {
+        if (body.contentEditable === 'false') return;
+        const sel = window.getSelection();
+        if (!sel.rangeCount || sel.isCollapsed) { body.focus(); return; }
+        const range = sel.getRangeAt(0);
+        if (!body.contains(range.commonAncestorContainer)) { body.focus(); return; }
+
+        const existingMark = closestHighlight(sel.anchorNode);
+        if (existingMark) {
+          unwrapMark(existingMark);
+        } else {
+          const mark = document.createElement('mark');
+          mark.className = 'note-highlight';
+          try { range.surroundContents(mark); }
+          catch (error) {
+            const frag = range.extractContents();
+            mark.appendChild(frag);
+            range.insertNode(mark);
+          }
+        }
+        sel.removeAllRanges();
+        body.focus();
+        updateNote();
+      }
+
+      // =====================================================================
+      //  Team docs (signed-in accounts only)
+      // =====================================================================
+
+      function setTdStatus(msg, bad) {
+        const el = $('td-status');
+        el.textContent = msg || '';
+        el.style.color = bad ? 'var(--red)' : '';
+      }
+
+      function allTeamDocs() {
+        const out = [];
+        Object.keys(teamDocsMap).forEach((teamId) => {
+          (teamDocsMap[teamId] || []).forEach((doc) => out.push({ teamId, doc, d: doc.data({ serverTimestamps: 'estimate' }) }));
+        });
+        out.sort((a, b) => tsMs(b.d.updatedAt) - tsMs(a.d.updatedAt));
+        return out;
+      }
+
+      function currentTeamDoc() {
+        if (!teamMode) return null;
+        return (teamDocsMap[teamMode.teamId] || []).find((x) => x.id === teamMode.id) || null;
+      }
+
+      function syncTeamUi() {
+        const loggedIn = !!(me() && dbase());
+        $('team-docs-wrap').hidden = !loggedIn;
+        $('share-team-btn').hidden = !loggedIn || !!teamMode || !activeNote();
+        if (loggedIn && !userTeamsUnsub) startTeamWatch();
+        if (!loggedIn && userTeamsUnsub) stopTeamWatch();
+      }
+
+      function stopTeamWatch() {
+        if (userTeamsUnsub) { userTeamsUnsub(); userTeamsUnsub = null; }
+        Object.keys(teamUnsubs).forEach((id) => { teamUnsubs[id](); });
+        teamUnsubs = {}; teamDocsMap = {}; userTeams = {};
+        // Signing out (or being removed) while a team doc is on screen: go back to a real
+        // note of your own. Leaving the team doc's text on screen would be editable but
+        // belong to no note, so anything typed would be silently thrown away.
+        if (teamMode) {
+          leaveTeamMode();
+          const back = activeId && notes.some((n) => n.id === activeId) ? activeId : (notes[0] && notes[0].id) || null;
+          if (back) openNote(back);
+          else { activeId = null; title.value = ''; body.innerHTML = ''; date.textContent = ''; showEditor(false); renderList(); }
+        }
+        renderTeamDocs();
+      }
+
+      function startTeamWatch() {
+        const u = me(), d = dbase();
+        if (!u || !d) return;
+        userTeamsUnsub = d.collection('teams').where('memberIds', 'array-contains', u.uid).onSnapshot((snap) => {
+          const fresh = {};
+          snap.forEach((doc) => {
+            const t = doc.data();
+            fresh[doc.id] = { name: t.name || 'Team', ownerId: t.ownerId, inviteCode: t.inviteCode || '' };
+            if (!teamUnsubs[doc.id]) {
+              teamUnsubs[doc.id] = doc.ref.collection('docs').orderBy('updatedAt', 'desc').onSnapshot((s) => {
+                teamDocsMap[doc.id] = s.docs;
+                onTeamDocsChanged();
+              }, (err) => console.warn('team docs listener: ' + (err && err.code ? err.code : err) + ' — publish the Firestore rules from README.md (the /docs block).', err));
+            }
+          });
+          Object.keys(teamUnsubs).forEach((id) => {
+            if (!fresh[id]) { teamUnsubs[id](); delete teamUnsubs[id]; delete teamDocsMap[id]; }
+          });
+          userTeams = fresh;
+          onTeamDocsChanged();
+          fillTeamSelect();
+        }, (err) => console.warn('teams listener', err));
+      }
+
+      function onTeamDocsChanged() {
+        pullTeamEditsIntoNotes();
+        renderTeamDocs();
+        if (teamMode) {
+          const cur = currentTeamDoc();
+          if (!cur) { leaveTeamMode(); activeId = notes[0]?.id || null; if (activeId) openNote(activeId); else { title.value = ''; body.innerHTML = ''; date.textContent = ''; showEditor(false); } }
+          else fillTeamDoc(cur, false);
+        }
+      }
+
+      // ----- teammate edits come back into my own note -----
+      // Every doc I shared keeps a link back to the note it came from. When somebody else
+      // edits that doc, their version is written into the note and the note is tagged
+      // "<name> added changes to this note" so it is obvious where the edit came from.
+
+      function pullTeamEditsIntoNotes() {
+        const u = me();
+        if (!u) return;
+        let touched = false;
+        Object.keys(teamDocsMap).forEach((teamId) => {
+          (teamDocsMap[teamId] || []).forEach((doc) => {
+            const link = linkFor(teamId, doc.id);
+            if (!link || !link.noteId) return;
+            const note = notes.find((n) => n.id === link.noteId);
+            if (!note) return;
+            const d = doc.data({ serverTimestamps: 'estimate' });
+            const stamp = tsMs(d.updatedAt);
+            const key = stampKey(teamId, doc.id);
+            const known = appliedStamps[key] || note.teamSyncAt || 0;
+            appliedStamps[key] = stamp;
+            if (d.updatedBy === u.uid) { note.teamSyncAt = stamp; touched = true; return; }   // my own save echoing back
+            if (stamp && stamp <= known) return;                                             // nothing new from a teammate
+            // Either a teammate just changed it, or this device is seeing that change for the
+            // first time (shared elsewhere, or edited while this tab was closed). Pull it in.
+            note.teamSyncAt = stamp;
+            const who = d.updatedByName || 'A teammate';
+            const teamName = (userTeams[teamId] && userTeams[teamId].name) || 'your team';
+            note.teamBy = who;
+            note.teamInfo = who + ' added changes to this note in ' + teamName;
+            note.title = d.title || note.title;
+            note.body = cleanDocHtml(d.body);
+            note.updatedAt = new Date(stamp || Date.now()).toISOString();
+            touched = true;
+            if (!teamMode && activeId === note.id) {
+              if (document.activeElement !== body && document.activeElement !== title) {
+                title.value = note.title;
+                body.innerHTML = note.body;
+                date.textContent = 'LAST EDITED ' + new Date(note.updatedAt).toLocaleString().toUpperCase();
+              }
+              showTeamBanner(note.id, who, teamName, doc.id, teamId);
+            }
+          });
+        });
+        if (touched) saveNotes();
+      }
+
+      function showTeamBanner(noteId, who, teamName, docId, teamId) {
+        bannerNoteId = noteId;
+        $('ntb-title').textContent = who + ' added changes to this note';
+        $('ntb-sub').textContent = 'Updated from ' + teamName + ' · merged into your note · ' +
+          new Date().toLocaleTimeString().toUpperCase();
+        $('ntb-open').dataset.teamId = teamId;
+        $('ntb-open').dataset.docId = docId;
+        $('note-team-banner').hidden = false;
+      }
+
+      function hideTeamBanner() {
+        bannerNoteId = null;
+        $('note-team-banner').hidden = true;
+      }
+
+      // Badge in the notes list so a change is visible even when the note is not open.
+      function renderList() {
+        count.textContent = notes.length;
+        list.replaceChildren();
+        if (!notes.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty-hint';
+          empty.style.padding = '12px 6px';
+          empty.textContent = 'No notes yet. Press + New note to add one.';
+          list.appendChild(empty);
+          return;
+        }
+        notes.forEach((note) => {
+          const item = document.createElement('div');
+          item.className = `np-item${!teamMode && note.id === activeId ? ' active' : ''}`;
+
+          const main = document.createElement('button');
+          main.type = 'button';
+          main.className = 'np-item-main';
+          const heading = document.createElement('b');
+          heading.textContent = note.title || 'Untitled note';
+          const preview = document.createElement('span');
+          preview.textContent = (note.body || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || 'Empty note';
+          main.append(heading, preview);
+          if (note.teamInfo) {
+            const tag = document.createElement('em');
+            tag.className = 'np-item-tag';
+            tag.textContent = note.teamInfo;
+            main.appendChild(tag);
+          }
+          main.addEventListener('click', () => openNote(note.id));
+
+          const del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'np-del';
+          del.setAttribute('aria-label', 'Delete note');
+          del.title = 'Delete note';
+          del.textContent = '×';
+          del.addEventListener('click', (event) => {
+            event.stopPropagation();
+            deleteNote(note.id);
+          });
+
+          item.append(main, del);
+          list.appendChild(item);
+        });
+      }
+
+      function renderTeamDocs() {
+        const box = $('team-doc-list');
+        const items = allTeamDocs();
+        $('team-doc-count').textContent = items.length;
+        box.replaceChildren();
+        if (!items.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty-hint';
+          empty.style.padding = '8px 6px';
+          empty.textContent = Object.keys(userTeams).length ? 'No shared docs yet. Share a note with your team.' : 'Join or create a team to share docs.';
+          box.appendChild(empty);
+          return;
+        }
+        items.forEach(({ teamId, doc, d }) => {
+          const item = document.createElement('div');
+          item.className = 'np-item team' + (teamMode && teamMode.id === doc.id ? ' active' : '');
+          const main = document.createElement('button');
+          main.type = 'button';
+          main.className = 'np-item-main';
+          const h = document.createElement('b');
+          h.textContent = d.title || 'Untitled doc';
+          const sub = document.createElement('span');
+          const who = Docs.names(d.body || '', d.ownerId || '');
+          sub.textContent = ((userTeams[teamId] && userTeams[teamId].name) || 'Team') + ' · ' + permLabel(d.permission) + ' · ' + (d.ownerName || '') +
+            (who.length ? ' · with ' + who.slice(0, 2).join(', ') + (who.length > 2 ? ' +' + (who.length - 2) : '') : '');
+          main.append(h, sub);
+          main.addEventListener('click', () => openTeamDoc(teamId, doc.id));
+          item.appendChild(main);
+          if (canDeleteDoc(teamId, d)) {
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'np-del';
+            del.title = 'Delete shared doc';
+            del.setAttribute('aria-label', 'Delete shared doc');
+            del.textContent = '×';
+            del.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              if (!window.confirm('Delete this shared doc for everyone in the team?')) return;
+              try {
+                await doc.ref.delete();
+                clearNoteLink(teamId, doc.id);
+                delete appliedStamps[stampKey(teamId, doc.id)];
+                if (teamMode && teamMode.teamId === teamId && teamMode.id === doc.id) leaveTeamMode();
+              } catch (err) { window.alert('Could not delete: ' + (err && err.message ? err.message : err)); }
+            });
+            item.appendChild(del);
+          }
+          box.appendChild(item);
+        });
+      }
+
+      function openTeamDoc(teamId, id) {
+        const doc = (teamDocsMap[teamId] || []).find((x) => x.id === id);
+        if (!doc) return;
+        if (teamMode && (teamMode.id !== id)) flushTeamSave();
+        teamMode = { teamId, id };
+        activeId = null;
+        hideTeamBanner();
+        showEditor(true);
+        renderList();
+        fillTeamDoc(doc, true);
+        renderTeamDocs();
+        syncTeamUi();
+      }
+
+      function fillTeamDoc(doc, force) {
+        const d = doc.data({ serverTimestamps: 'estimate' });
+        const can = canEditDoc(d);
+        const locked = docLockedForMe(d);
+        const stamp = tsMs(d.updatedAt);
+        const editing = document.activeElement === body || document.activeElement === title;
+
+        // locked => always render exactly what the team stored, never what is on screen
+        if (force || locked || (!editing && stamp !== tdLoadedAt)) {
+          title.value = d.title || '';
+          body.innerHTML = cleanDocHtml(d.body);
+          tdLoadedAt = stamp;
+          $('td-reload').hidden = true;
+        } else if (editing && stamp !== tdLoadedAt) {
+          if (d.updatedBy === (me() && me().uid)) tdLoadedAt = stamp;
+          else $('td-reload').hidden = false;
+        }
+
+        title.readOnly = !can;
+        body.contentEditable = can ? 'true' : 'false';
+        body.setAttribute('aria-readonly', can ? 'false' : 'true');
+        body.classList.toggle('doc-locked', locked);
+        toolButtons().forEach((b) => { b.disabled = !can; });
+
+        const teamName = (userTeams[teamMode.teamId] && userTeams[teamMode.teamId].name) || 'Team';
+        const isOwner = isDocOwner(d);
+        $('td-info').innerHTML = '<i class="fa-solid fa-users"></i> Team doc · ' + escapeTeamText(teamName) +
+          ' · by ' + escapeTeamText(d.ownerName || 'Someone') +
+          writtenByLabel(d) +
+          (can ? '' : ' · <b>locked (view only)</b> — only ' + escapeTeamText(d.ownerName || 'the owner') + ' can change this');
+        // The access switch belongs to the person who shared the doc. Hidden AND disabled
+        // for everyone else, so a teammate cannot flip a locked doc back to "can edit".
+        const sel = $('td-perm');
+        sel.hidden = !isOwner;
+        sel.disabled = !isOwner;
+        if (isOwner) sel.value = d.permission === 'write' ? 'write' : 'read';
+        $('td-banner').hidden = false;
+        date.textContent = d.updatedAt ? ('LAST EDITED ' + new Date(tsMs(d.updatedAt)).toLocaleString().toUpperCase() + (d.updatedByName ? ' BY ' + String(d.updatedByName).toUpperCase() : '')) : '';
+        if (!tdSaveTimer) setTdStatus(can ? 'Autosaves as you type' : (locked ? 'Locked — ' + (d.ownerName || 'the owner') + ' keeps this view only' : 'View only'));
+      }
+
+      function teamDocEdited() {
+        const cur = currentTeamDoc();
+        if (!cur || !canEditDoc(cur.data())) return;
+        clearTimeout(tdSaveTimer);
+        setTdStatus('Editing…');
+        tdSaveTimer = setTimeout(saveTeamDoc, 700);
+      }
+
+      function flushTeamSave() { if (tdSaveTimer) saveTeamDoc(); }
+
+      function flushNotePush() { if (notePushTimer) { clearTimeout(notePushTimer); notePushTimer = null; pushNoteToTeamDoc(); } }
+
+      async function saveTeamDoc() {
+        clearTimeout(tdSaveTimer);
+        tdSaveTimer = null;
+        const cur = currentTeamDoc();
+        const u = me();
+        if (!cur || !u) return;
+        const d = cur.data();
+        if (!canEditDoc(d)) {                       // access changed while typing
+          setTdStatus('Access changed — this doc is view only now', true);
+          fillTeamDoc(cur, true);
+          return;
+        }
+        // my new lines get my name, lines that are unchanged keep theirs
+        const html = tagMyContribution(cleanDocHtml(body.innerHTML), d.body, d.ownerId);
+        if (html.length > DOC_MAX) { setTdStatus('Too large to save (limit ≈ 200 KB)', true); return; }
+        setTdStatus('Saving…');
+        try {
+          await cur.ref.update({
+            title: (title.value || '').trim().slice(0, 120) || 'Untitled doc',
+            body: html,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: u.uid,
+            updatedByName: myName()
+          });
+          if (document.activeElement !== body) body.innerHTML = html;   // show the fresh stamps
+          if (!tdSaveTimer) setTdStatus('Saved ✓');
+        } catch (err) {
+          setTdStatus('Could not save: ' + (err && err.code === 'permission-denied' ? 'this doc is view only for you, or /docs rules not published' : (err && err.message) || err), true);
+        }
+      }
+
+      // ----- Share with team dialog -----
+      const shareDialog = $('share-dialog');
+      const setShareStatus = (msg, bad) => { const el = $('share-status'); el.textContent = msg || ''; el.style.color = bad ? 'var(--red)' : 'var(--green)'; };
+
+      function fillTeamSelect() {
+        const sel = $('share-team-select');
+        if (!sel) return;
+        const keep = pendingSelectTeam || sel.value;
+        sel.replaceChildren();
+        const ids = Object.keys(userTeams);
+        if (!ids.length) {
+          const o = document.createElement('option');
+          o.value = ''; o.textContent = 'You are not in any team yet';
+          sel.appendChild(o);
+          $('share-send').disabled = true;
+        } else {
+          ids.forEach((id) => {
+            const o = document.createElement('option');
+            o.value = id; o.textContent = userTeams[id].name;
+            sel.appendChild(o);
+          });
+          if (keep && userTeams[keep]) sel.value = keep;
+          pendingSelectTeam = null;
+          $('share-send').disabled = false;
+        }
+        updateShareHint();
+      }
+
+      function updateShareHint() {
+        const teamId = $('share-team-select').value;
+        const note = activeNote();
+        const hint = $('share-hint');
+        if (!teamId || !note) { hint.textContent = ''; return; }
+        const already = (teamDocsMap[teamId] || []).some((x) => { const d = x.data(); return d.sourceNoteId === note.id && d.ownerId === me().uid; });
+        const code = userTeams[teamId] && userTeams[teamId].inviteCode;
+        hint.textContent = (already ? 'This note is already shared here — sharing again updates the team copy. ' : '') + (code ? 'Invite code for this team: ' + code : '');
+      }
+
+      function openShare() {
+        if (!me() || !dbase()) { window.alert('Sign in to your account to share notes with a team.'); return; }
+        if (!activeNote()) { window.alert('Open or create a note first, then press Share with team.'); return; }
+        $('share-note-name').textContent = 'Note: ' + (activeNote().title || 'Untitled note');
+        $('share-msg').value = '';
+        setShareStatus('');
+        fillTeamSelect();
+        $('share-join-details').open = !Object.keys(userTeams).length;
+        if (!shareDialog.open) shareDialog.showModal();
+      }
+
+      async function sendShare() {
+        const u = me(), d = dbase(), note = activeNote();
+        const teamId = $('share-team-select').value;
+        if (!u || !d || !note || !teamId) return;
+        const permission = $('share-perm').value === 'read' ? 'read' : 'write';
+        const docTitle = (note.title || '').trim().slice(0, 120) || 'Untitled note';
+        const btn = $('share-send');
+        btn.disabled = true;
+        setShareStatus('Sharing…');
+        try {
+          const ts = firebase.firestore.FieldValue.serverTimestamp();
+          const teamRef = d.collection('teams').doc(teamId);
+          const existing = (teamDocsMap[teamId] || []).find((x) => { const v = x.data(); return v.sourceNoteId === note.id && v.ownerId === u.uid; });
+          // Stamped with my name: lines the team already had keep their author (they may
+          // have written some of them), everything new is credited to me.
+          const html = tagMyContribution(cleanDocHtml(note.body), existing ? existing.data().body : '', u.uid);
+          if (html.length > DOC_MAX) { setShareStatus('This note is too large to share (limit ≈ 200 KB).', true); return; }
+          let docRef, verb;
+          if (existing) {
+            docRef = existing.ref;
+            await docRef.update({ title: docTitle, body: html, permission, updatedAt: ts, updatedBy: u.uid, updatedByName: myName() });
+            verb = 'Updated';
+          } else {
+            docRef = teamRef.collection('docs').doc();
+            await docRef.set({
+              title: docTitle, body: html, ownerId: u.uid, ownerName: myName(), permission,
+              sourceNoteId: note.id, createdAt: ts, updatedAt: ts, updatedBy: u.uid, updatedByName: myName()
+            });
+            verb = 'Shared';
+          }
+          setNoteLink(teamId, docRef.id, note.id);
+          appliedStamps[stampKey(teamId, docRef.id)] = Date.now();
+          note.teamSyncAt = Date.now();
+          note.teamInfo = null;
+          saveNotes();
+          const extra = $('share-msg').value.trim();
+          // One single doc line in the team chat (no second "Shared a doc" bubble).
+          await teamRef.collection('messages').add({
+            senderId: u.uid,
+            senderName: myName(),
+            kind: 'system',
+            text: myName() + (verb === 'Updated' ? ' updated "' : ' added you to "') + docTitle + '" — ' +
+              (permission === 'write' ? 'your edits save back to their note' : 'view only') +
+              (extra ? ' · ' + extra : ''),
+            sharedDocRef: { id: docRef.id, title: docTitle, permission },
+            createdAt: ts
+          });
+          setShareStatus('Shared with ' + userTeams[teamId].name + ' (' + permLabel(permission).toLowerCase() + ') ✓');
+          setTimeout(() => { if (shareDialog.open) shareDialog.close(); }, 1100);
+        } catch (err) {
+          setShareStatus('Could not share: ' + (err && err.code === 'permission-denied' ? 'permission denied — publish the updated Firestore rules from README.md (the /docs block).' : (err && err.message) || err), true);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      async function joinTeamByCode() {
+        const u = me(), d = dbase();
+        const code = $('share-join-code').value.trim().toUpperCase();
+        if (!u || !d || !code) return;
+        setShareStatus('Joining…');
+        try {
+          const snap = await d.collection('teams').where('inviteCode', '==', code).limit(1).get();
+          if (snap.empty) { setShareStatus('No team found with that invite code.', true); return; }
+          const doc = snap.docs[0];
+          if (!(doc.data().memberIds || []).includes(u.uid)) {
+            await doc.ref.update({
+              memberIds: firebase.firestore.FieldValue.arrayUnion(u.uid),
+              ['members.' + u.uid]: { name: myName() }
+            });
+          }
+          pendingSelectTeam = doc.id;
+          $('share-join-code').value = '';
+          setShareStatus('Joined ' + (doc.data().name || 'team') + ' ✓');
+          fillTeamSelect();
+        } catch (err) {
+          setShareStatus('Could not join: ' + (err && err.message ? err.message : err), true);
+        }
+      }
+
+      async function createTeamFromDialog() {
+        const u = me(), d = dbase();
+        const name = $('share-create-name').value.trim();
+        if (!u || !d || !name) return;
+        setShareStatus('Creating team…');
+        try {
+          const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+          let code = '';
+          for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+          const ref = d.collection('teams').doc();
+          await ref.set({
+            name, ownerId: u.uid, inviteCode: code, memberIds: [u.uid],
+            members: { [u.uid]: { name: myName() } },
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          pendingSelectTeam = ref.id;
+          $('share-create-name').value = '';
+          setShareStatus('Team created ✓ Invite code: ' + code + ' — send it to your teammates.');
+          fillTeamSelect();
+        } catch (err) {
+          setShareStatus('Could not create the team: ' + (err && err.message ? err.message : err), true);
+        }
+      }
+
+      // Sidebar shortcut: join a team without opening a note
+      async function quickJoin() {
+        const u = me(), d = dbase();
+        if (!u || !d) return;
+        const code = window.prompt('Enter the team invite code');
+        if (!code || !code.trim()) return;
+        try {
+          const snap = await d.collection('teams').where('inviteCode', '==', code.trim().toUpperCase()).limit(1).get();
+          if (snap.empty) { window.alert('No team found with that invite code.'); return; }
+          const doc = snap.docs[0];
+          if ((doc.data().memberIds || []).includes(u.uid)) { window.alert('You are already in "' + (doc.data().name || 'that team') + '".'); return; }
+          await doc.ref.update({
+            memberIds: firebase.firestore.FieldValue.arrayUnion(u.uid),
+            ['members.' + u.uid]: { name: myName() }
+          });
+          window.alert('Joined "' + (doc.data().name || 'team') + '". Its shared docs will appear below.');
+        } catch (err) {
+          window.alert('Could not join: ' + (err && err.message ? err.message : err));
+        }
+      }
+
+      // ----- wiring -----
+      $('new-note').addEventListener('click', createNote);
+      $('new-note-empty').addEventListener('click', createNote);
+      // Read-only guard: while a team doc is locked for me nothing may change it.
+      // contentEditable="false" already stops typing; this catches hand-made events,
+      // drops and any browser that still lets a caret through.
+      const teamDocWritable = () => {
+        if (!teamMode) return true;                       // my own note is always mine
+        const cur = currentTeamDoc();
+        return !!(cur && canEditDoc(cur.data()));
+      };
+      [title, body].forEach((element) => {
+        element.addEventListener('beforeinput', (e) => { if (!teamDocWritable()) e.preventDefault(); });
+        element.addEventListener('input', updateNote);
+      });
+      ['paste', 'drop'].forEach((evt) => {
+        body.addEventListener(evt, (e) => {
+          if (!teamMode) return;                        // shared docs are plain-text paste only (keeps them safe for everyone)
+          e.preventDefault();
+          if (!teamDocWritable() || evt !== 'paste') return;
+          document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+        });
+      });
+      $('highlight-btn').addEventListener('click', toggleHighlight);
+      document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => {
+        if (body.contentEditable === 'false') return;   // read-only: the toolbar is disabled, and this is the belt
+        document.execCommand(button.dataset.command, false, button.dataset.value || null);
+        body.focus();
+        updateNote();
+      }));
+
+      $('share-team-btn').addEventListener('click', openShare);
+      $('share-send').addEventListener('click', sendShare);
+      $('share-cancel').addEventListener('click', () => shareDialog.close());
+      $('share-team-select').addEventListener('change', updateShareHint);
+      $('share-join-btn').addEventListener('click', joinTeamByCode);
+      $('share-create-btn').addEventListener('click', createTeamFromDialog);
+      $('np-join-team').addEventListener('click', quickJoin);
+      $('ntb-dismiss').addEventListener('click', () => {
+        const note = notes.find((n) => n.id === bannerNoteId);
+        if (note) { note.teamInfo = null; saveNotes(); }
+        hideTeamBanner();
+      });
+      $('ntb-open').addEventListener('click', () => {
+        const teamId = $('ntb-open').dataset.teamId;
+        const docId = $('ntb-open').dataset.docId;
+        if (teamId && docId) openTeamDoc(teamId, docId);
+      });
+      $('td-reload').addEventListener('click', () => { const cur = currentTeamDoc(); if (cur) fillTeamDoc(cur, true); });
+      $('td-perm').addEventListener('change', async () => {
+        const sel = $('td-perm');
+        const cur = currentTeamDoc();
+        const d = cur ? cur.data() : null;
+        // The switch belongs to the person who shared the doc, and the /docs rules in
+        // README.md enforce the same thing on the server.
+        if (!cur || !me() || !isDocOwner(d)) {
+          if (d) sel.value = d.permission === 'write' ? 'write' : 'read';
+          window.alert('Only ' + ((d && d.ownerName) || 'the owner') + ' can change who can edit this doc.');
+          return;
+        }
+        const wanted = sel.value === 'write' ? 'write' : 'read';
+        const stored = d.permission === 'write' ? 'write' : 'read';
+        if (wanted === stored) return;
+        if (wanted === 'write' && !window.confirm('Open this doc up so everyone in the team can edit it?\nYou can lock it again any time.')) {
+          sel.value = 'read';
+          return;
+        }
+        try { await cur.ref.update({ permission: wanted }); }
+        catch (err) { window.alert('Could not change permission: ' + (err && err.message ? err.message : err)); }
+      });
+      window.addEventListener('beforeunload', () => { flushTeamSave(); flushNotePush(); });
+
+      document.addEventListener('lifeIsShortDataReady', () => {
+        noteLinks = loadNoteLinks();
+        if (teamMode) { syncTeamUi(); return; }
+        notes = loadNotes();
+        activeId = notes[0]?.id || null;
+        renderList();
+        if (activeId) openNote(activeId);
+        else { title.value = ''; body.innerHTML = ''; date.textContent = ''; showEditor(false); }
+        syncTeamUi();
+      });
+
+      refreshUser();
+      renderList();
+      if (activeId) openNote(activeId); else showEditor(false);   // never auto-create an untitled note
+    })();
+  </script>
+
+  <dialog id="password-dialog" class="auth-password-dialog">
+    <form class="auth-form" id="password-form" novalidate>
+      <h2>Update password</h2>
+      <p class="auth-password-warning">Please save your password somewhere else too. This site does not offer password recovery.</p>
+      <label for="current-password">Current password</label>
+      <input id="current-password" type="password" autocomplete="current-password" required>
+      <label for="new-password">New password</label>
+      <input id="new-password" type="password" autocomplete="new-password" minlength="6" required>
+      <label for="confirm-password">Confirm new password</label>
+      <input id="confirm-password" type="password" autocomplete="new-password" minlength="6" required>
+      <p class="auth-error" id="password-error" role="alert"></p>
+      <button type="submit" class="auth-button auth-button-primary" id="password-submit">Update password</button>
+      <button type="button" class="auth-back-button" id="password-cancel">Cancel</button>
+    </form>
+  </dialog>
+  <script>
+    // Keep the fixed notes sidebar right under the top bar.
+    (function () {
+      var tb = document.querySelector('.topbar'); if (!tb) return;
+      function sync() { document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px'); }
+      sync(); window.addEventListener('resize', sync); window.addEventListener('load', sync);
+      if (window.ResizeObserver) new ResizeObserver(sync).observe(tb);
+    })();
+  </script>
+</body>
+</html>
