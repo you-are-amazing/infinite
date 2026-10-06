@@ -120,7 +120,7 @@
   });
 
   function mailtoFallback(name, email, msg) {
-    var body = msg + '\n\n— ' + name + ' (' + email + ')';
+    var body = msg + '\n\n- ' + name + ' (' + email + ')';
     return 'mailto:' + EMAIL + '?subject=' + encodeURIComponent('Hello from ' + name + ' (via Infinite)') + '&body=' + encodeURIComponent(body);
   }
 

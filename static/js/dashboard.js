@@ -170,7 +170,7 @@
   function setQuote(i) {
     quoteIdx = ((i % QUOTES.length) + QUOTES.length) % QUOTES.length;
     $('axiom-text').textContent = '"' + QUOTES[quoteIdx][0] + '"';
-    $('axiom-by').textContent = '— ' + QUOTES[quoteIdx][1];
+    $('axiom-by').textContent = '- ' + QUOTES[quoteIdx][1];
   }
   function copyAxiom() {
     const text = $('axiom-text').textContent + ' ' + $('axiom-by').textContent;

@@ -50,7 +50,7 @@
     return d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' });
   }
   function replyLink(m) {
-    var body = 'Hi ' + String(m.name || '').split(' ')[0] + ',\n\n\n———\nOn ' + fmt(m.createdAt) + ', ' + String(m.name || 'someone') + ' wrote:\n\n' + String(m.message || '');
+    var body = 'Hi ' + String(m.name || '').split(' ')[0] + ',\n\n\n---\nOn ' + fmt(m.createdAt) + ', ' + String(m.name || 'someone') + ' wrote:\n\n' + String(m.message || '');
     return 'mailto:' + String(m.email || '').trim() + '?subject=' + encodeURIComponent('Re: your message to Infinite') + '&body=' + encodeURIComponent(body);
   }
 

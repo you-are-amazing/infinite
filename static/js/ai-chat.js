@@ -543,7 +543,7 @@
           '<div><b>INFINITE AI</b><small>your life assistant</small></div></div>' +
         '<button type="button" class="aic-new" id="aic-new"><i class="fa-solid fa-plus"></i>New chat</button>' +
         '<div class="aic-rail-list" id="aic-rail-list"></div>' +
-        '<div class="aic-rail-foot"><div class="aic-rail-who">Signed in as <b>—</b></div>' +
+        '<div class="aic-rail-foot"><div class="aic-rail-who">Signed in as <b>--</b></div>' +
           '<div>AI can make mistakes. Check before you add.</div></div>' +
       '</aside>' +
       '<div class="aic-main">' +
