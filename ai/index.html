@@ -16,6 +16,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js" defer></script>
   <script src="../static/js/auth.js?v=9" defer></script>
   <script src="../static/js/sticky-notes.js?v=2" defer></script>
+  <script src="../static/js/tour.js?v=1" defer></script>
   <style>
     html,body{height:100%}
     body.ax{display:flex;height:100vh;overflow:hidden;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}
@@ -38,15 +39,23 @@
     .ax-chats{flex:1;overflow-y:auto;padding:0 20px 12px}
     .ax-chat{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;border:1px solid transparent;border-radius:10px;background:none;color:var(--muted);font-size:14.5px;text-align:left;margin-bottom:3px}
     .ax-chat span.n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .ax-chat time{font:11.5px 'JetBrains Mono',monospace;color:var(--muted)}
+    .ax-chat time{font:11.5px 'JetBrains Mono',monospace;color:var(--muted);flex:none}
     .ax-chat:hover{background:var(--surface2)}
     .ax-chat.on{background:var(--surface2);border-color:var(--line);color:var(--text)}
     .ax-chat.on i{color:var(--green)}
+    .ax-chat-del{flex:none;width:26px;height:26px;border:0;border-radius:6px;background:transparent;color:var(--faint);cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s ease,background .15s ease,color .15s ease}
+    .ax-chat:hover .ax-chat-del,.ax-chat.on .ax-chat-del,.ax-chat:focus-within .ax-chat-del{opacity:1}
+    .ax-chat-del:hover{background:var(--red-soft);color:var(--red)}
+    @media (hover:none){.ax-chat-del{opacity:1}}
     .ax-empty-chats{padding:8px 12px;font-size:13px;color:var(--faint)}
     .ax-foot{border-top:1px solid var(--line-soft);padding:16px 20px;display:flex;align-items:center;gap:12px}
     .ax-foot .avatar{width:44px;height:44px;border-radius:50%;background:var(--green);color:#06140d;display:grid;place-items:center;font-weight:700;border:2px solid rgba(61,220,151,.4)}
     .ax-foot .nm{font-weight:600;font-size:15px}
     .ax-foot .st{font-size:12px;color:var(--green);letter-spacing:.04em;text-transform:uppercase}
+    .ax-del-all{margin-top:auto;padding:8px 12px;border-top:1px solid var(--line-soft)}
+    .ax-del-all-btn{width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface2);color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .15s ease}
+    .ax-del-all-btn:hover{border-color:var(--red);background:var(--red-soft);color:var(--red)}
+    .ax-del-all-btn i{color:inherit}
 
     /* main */
     .ax-main{flex:1;min-width:0;display:flex;flex-direction:column;background:#000;position:relative}
@@ -169,6 +178,7 @@
     <button class="ax-new" id="ax-new" type="button"><i class="fa-solid fa-plus"></i> New conversation</button>
     <div class="ax-sec" style="margin-top:18px">Recent chats</div>
     <div class="ax-chats" id="ax-chats"></div>
+    <div class="ax-del-all"><button type="button" class="ax-del-all-btn" id="ax-del-all" title="Delete all conversations"><i class="fa-solid fa-trash-can"></i> Delete all chats</button></div>
     <div class="ax-foot">
       <div class="avatar" id="user-initial">?</div>
       <div><div class="nm" id="user-name">Guest</div><div class="st">Synced • Cloud</div></div>
@@ -360,7 +370,7 @@
     var el = $('ax-chats');
     if (!chats.length) { el.innerHTML = '<div class="ax-empty-chats">No conversations yet.</div>'; return; }
     el.innerHTML = chats.map(function (c) {
-      return '<button type="button" class="ax-chat' + (cur && c.id === cur.id ? ' on' : '') + '" data-id="' + c.id + '"><i class="fa-regular fa-comment-dots"></i><span class="n">' + esc(c.title) + '</span><time>' + ago(c.ts) + '</time></button>';
+      return '<button type="button" class="ax-chat' + (cur && c.id === cur.id ? ' on' : '') + '" data-id="' + c.id + '"><i class="fa-regular fa-comment-dots"></i><span class="n">' + esc(c.title) + '</span><time>' + ago(c.ts) + '</time><button type="button" class="ax-chat-del" data-del="' + c.id + '" aria-label="Delete conversation" title="Delete"><i class="fa-solid fa-trash-can"></i></button></button>';
     }).join('');
   }
   function describe(a) {
@@ -574,9 +584,30 @@
         }
       }
     };
+    function deleteChat(id) {
+      var idx = chats.findIndex(function (c) { return c.id === id; });
+      if (idx === -1) return;
+      chats.splice(idx, 1);
+      if (cur && cur.id === id) { cur = null; drawThread(); }
+      saveChats(); drawChats(); toast('Conversation deleted');
+    }
+
+    function deleteAllChats() {
+      if (!chats.length) return;
+      if (!window.confirm('Delete all ' + chats.length + ' conversation' + (chats.length > 1 ? 's' : '') + '? This cannot be undone.')) return;
+      chats = [];
+      cur = null;
+      saveChats(); drawChats(); drawThread(); toast('All conversations deleted');
+    }
+
     $('ax-chats').addEventListener('click', function (e) {
+      var del = e.target.closest('.ax-chat-del');
+      if (del) { e.stopPropagation(); deleteChat(del.dataset.del); return; }
       var b = e.target.closest('.ax-chat'); if (!b || busy) return;
       cur = chats.filter(function (c) { return c.id === b.dataset.id; })[0] || null; drawChats(); drawThread();
+    });
+    $('ax-del-all').addEventListener('click', function (e) {
+      e.stopPropagation(); deleteAllChats();
     });
     $('ax-thread').addEventListener('click', function (e) {
       var cp = e.target.closest('.ax-cp');
