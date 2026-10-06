@@ -520,7 +520,7 @@ function deleteNote(id) {
   const msg = total > 1 ? 'Delete this note and its ' + (total - 1) + ' subnote' + (total > 2 ? 's' : '') + '?' : 'Delete this note?';
   if (!window.confirm(msg)) return;
 
-  const removed = collectAllIds([target]).concat(id);
+  const removed = collectAllIds([target]);
   const fallback = pickAfterDelete(id);
   const activeRemoved = !teamMode && removed.includes(activeId);
 
@@ -554,8 +554,9 @@ function collectAllIds(arr) {
   return ids;
 }
 
-function closestHighlight(node) {
-      }
+function countAllNotes(arr) {
+  return (arr || []).reduce((sum, n) => sum + 1 + countAllNotes(n.children), 0);
+}
 
       function closestHighlight(node) {
         while (node && node !== body) {
@@ -832,46 +833,6 @@ function closestHighlight(node) {
           node.appendChild(kids);
         }
         return node;
-      }
-        addSub.style.color = 'var(--muted)';
-        addSub.style.cursor = 'pointer';
-        addSub.style.display = 'flex';
-        addSub.style.alignItems = 'center';
-        addSub.style.justifyContent = 'center';
-        addSub.addEventListener('click', (e) => {
-          e.stopPropagation();
-          addSubnote(note.id);
-        });
-        actions.appendChild(addSub);
-
-        const del = document.createElement('button');
-        del.type = 'button';
-        del.className = 'np-del';
-        del.setAttribute('aria-label', 'Delete note');
-        del.title = 'Delete note';
-        del.textContent = '×';
-        del.addEventListener('click', (event) => {
-          event.stopPropagation();
-          deleteNote(note.id);
-        });
-        actions.appendChild(del);
-
-        wrapper.append(main, actions);
-        item.appendChild(wrapper);
-
-        if (note.children && note.children.length > 0 && note.expanded) {
-          const childrenContainer = document.createElement('div');
-          childrenContainer.className = 'np-children';
-          childrenContainer.style.marginLeft = '16px';
-          childrenContainer.style.borderLeft = '1px solid var(--line-soft)';
-          childrenContainer.style.paddingLeft = '8px';
-          note.children.forEach((child) => {
-            childrenContainer.appendChild(buildNoteItem(child, depth + 1));
-          });
-          item.appendChild(childrenContainer);
-        }
-
-        return item;
       }
 
       function renderTeamDocs() {
