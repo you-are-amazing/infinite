@@ -54,6 +54,9 @@
     const walk = (parent, root) => {
       Array.from(parent.childNodes).forEach((n) => {
         if (n.nodeType === 3) return;                       // plain text is always safe
+        // Link preview cards from a personal note are not shared; a plain link keeps its words but loses the link.
+        if (n.nodeType === 1 && n.classList && n.classList.contains('np-linkcard')) { n.remove(); return; }
+        if (n.nodeType === 1 && n.tagName === 'A') { n.replaceWith(document.createTextNode(n.textContent)); return; }
         if (n.nodeType !== 1 || !DOC_TAGS.has(n.tagName)) { n.remove(); return; }
         const kept = {};
         KEEP_ATTRS.forEach((k) => { const v = n.getAttribute(k); if (v !== null) kept[k] = v; });
@@ -296,4 +299,3 @@
     colorOf
   };
 })();
-

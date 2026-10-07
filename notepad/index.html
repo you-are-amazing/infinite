@@ -11,6 +11,29 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* Links inside a personal note + the preview card a pasted link gets */
+    #note-body a { color: var(--green); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; overflow-wrap: anywhere; }
+    #note-body a:hover { filter: brightness(1.15); }
+    #note-body .np-linkcard { position: relative; display: block; max-width: 560px; margin: 10px 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface2); overflow: hidden; font-size: 13.5px; line-height: 1.4; user-select: none; -webkit-user-select: none; transition: border-color .15s ease, transform .15s ease; }
+    #note-body .np-linkcard:hover { border-color: var(--green); }
+    #note-body .np-linkcard a.np-lc-main { display: flex; align-items: stretch; min-height: 84px; color: inherit; text-decoration: none; }
+    #note-body .np-lc-thumb { flex: none; width: 128px; background: var(--surface); border-right: 1px solid var(--line-soft); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #note-body .np-lc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    #note-body .np-linkcard.np-lc-icononly .np-lc-thumb img { width: 36px; height: 36px; object-fit: contain; border-radius: 8px; }
+    #note-body .np-lc-thumb:empty::before { content: "\f0c1"; font-family: "Font Awesome 6 Free"; font-weight: 900; font-size: 20px; color: var(--faint); }
+    #note-body .np-lc-info { flex: 1; min-width: 0; padding: 10px 34px 10px 14px; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+    #note-body .np-lc-title { font-weight: 600; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    #note-body .np-lc-desc { color: var(--muted); font-size: 12.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    #note-body .np-lc-desc:empty { display: none; }
+    #note-body .np-lc-site { color: var(--faint); font-size: 11.5px; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #note-body .np-lc-x { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); font-size: 17px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .15s ease, background .15s ease, color .15s ease; }
+    #note-body .np-linkcard:hover .np-lc-x, #note-body .np-lc-x:focus-visible { opacity: 1; }
+    #note-body .np-lc-x:hover { background: var(--red-soft); color: var(--red); }
+    @media (hover: none) { #note-body .np-lc-x { opacity: 1; } }
+    @media (max-width: 520px) { #note-body .np-lc-thumb { width: 92px; } }
+    #note-body.doc-locked .np-lc-x { display: none; }
+  </style>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" defer></script>
@@ -20,7 +43,7 @@
   <script src="../static/js/ai-chat.js?v=9" defer></script>
   <!-- Shared doc helpers (sanitizer + "who wrote which part" stamps). Deliberately
        without defer: the inline page script below runs while the page is parsing. -->
-  <script src="../static/js/doc-attrib.js?v=2"></script>
+  <script src="../static/js/doc-attrib.js?v=3"></script>
   <script src="../static/js/tour.js?v=1" defer></script>
 </head>
 <body>
@@ -211,6 +234,11 @@
       let noteLinks = loadNoteLinks();   // noteId -> { teamId, docId, at } — the docs I sent my notes to
       let appliedStamps = {};            // teamId + '/' + docId -> ms of the newest version already pulled into the note
       let bannerNoteId = null;           // note the "teammate changed this" banner is currently showing
+
+      // ----- link previews (pasted URLs) -----
+      const LINK_RE = /https?:\/\/[^\s<>"']+/gi;
+      const MAX_LINK_CARDS = 3;           // a paste with more links than this only gets plain links
+      const linkFetching = new WeakSet(); // cards whose preview is being fetched right now
 
       const MAX_DEPTH = 5;            // top level = 0, so 6 levels in total
       let animateId = null;           // only animate the list that was just expanded
@@ -424,6 +452,7 @@ function findNoteById(arr, id) {
         showEditor(true);
         title.value = note.title || '';
         body.innerHTML = note.body || '';
+        hydrateLinkCards();
         date.textContent = `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}`;
         renderCrumbs();
         syncTeamUi();
@@ -1183,6 +1212,233 @@ function countAllNotes(arr) {
           document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
         });
       });
+
+      /* ---------- pasted links: real links + a preview card ----------
+       * Pasting a URL into one of YOUR notes turns it into a clickable link and adds a small
+       * card under it (thumbnail, title, site). The card is ordinary markup inside the note body,
+       * so it is saved and synced with the note. Team docs are plain-text paste only and their
+       * sanitizer drops links and cards, so nothing here reaches other people.
+       * Previews come from public services: YouTube thumbnails straight from i.ytimg.com (title
+       * via noembed.com), everything else from api.microlink.io. Change fetchLinkMeta to swap them.
+       */
+      const BLOCK_RE = /^(DIV|P|UL|OL|BLOCKQUOTE|LI|H[1-6]|PRE|TABLE)$/;
+      const isCard = (n) => !!(n && n.nodeType === 1 && n.classList.contains('np-linkcard'));
+      const blankLine = () => { const d = document.createElement('div'); d.appendChild(document.createElement('br')); return d; };
+
+      function httpUrl(s) {
+        try { const u = new URL(String(s)); return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null; }
+        catch (e) { return null; }
+      }
+      function httpsImage(s) { const u = httpUrl(s); return u ? u.replace(/^http:/i, 'https:') : null; }
+      function hostOf(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } }
+      function youtubeId(url) {
+        try {
+          const u = new URL(url), h = u.hostname.replace(/^(www|m)\./, '');
+          let id = null;
+          if (h === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+          else if (h === 'youtube.com' || h === 'music.youtube.com') {
+            if (u.pathname === '/watch') id = u.searchParams.get('v');
+            else { const m = u.pathname.match(/^\/(?:shorts|embed|live)\/([^/?]+)/); if (m) id = m[1]; }
+          }
+          return id && /^[\w-]{6,15}$/.test(id) ? id : null;
+        } catch (e) { return null; }
+      }
+
+      // "see https://x.com/a." -> the full stop and a closing bracket that has no opener are not part of the link
+      function splitTail(raw) {
+        let url = raw, tail = '';
+        for (;;) {
+          const c = url.slice(-1);
+          const unmatched = c === ')' && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length;
+          if (!url || !(/[.,;:!?'"\]}]/.test(c) || unmatched)) break;
+          tail = c + tail; url = url.slice(0, -1);
+        }
+        return [url, tail];
+      }
+
+      // Plain pasted text -> html with every URL as an <a>. Lines are joined with <br> so it can be
+      // inserted in the middle of an existing line.
+      function linkifyPaste(text) {
+        const urls = [];
+        const html = String(text).replace(/\r\n?/g, '\n').split('\n').map((line) => {
+          let out = '', last = 0;
+          line.replace(LINK_RE, (raw, offset) => {
+            const [bare, tail] = splitTail(raw);
+            const href = httpUrl(bare);
+            if (!href) return raw;
+            out += escapeTeamText(line.slice(last, offset)) +
+              '<a href="' + escapeTeamText(href) + '" target="_blank" rel="noopener noreferrer" data-np-new="1">' + escapeTeamText(bare) + '</a>' +
+              escapeTeamText(tail);
+            last = offset + raw.length;
+            urls.push(href);
+            return raw;
+          });
+          return out + escapeTeamText(line.slice(last));
+        }).join('<br>');
+        return { html, urls };
+      }
+
+      function setCardImage(card, src, isIcon) {
+        const thumb = card.querySelector('.np-lc-thumb');
+        if (!thumb) return;
+        thumb.textContent = '';
+        card.classList.toggle('np-lc-icononly', !!isIcon);
+        if (!src) return;
+        const img = document.createElement('img');
+        img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
+        img.src = src;
+        thumb.appendChild(img);
+      }
+
+      function makeLinkCard(url) {
+        const host = hostOf(url);
+        const card = document.createElement('div');
+        card.className = 'np-linkcard';
+        card.setAttribute('contenteditable', 'false');
+        card.dataset.url = url;
+        card.dataset.state = 'pending';           // 'done' once the preview has been filled in
+        const a = document.createElement('a');
+        a.className = 'np-lc-main'; a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        const thumb = document.createElement('span'); thumb.className = 'np-lc-thumb';
+        const info = document.createElement('span'); info.className = 'np-lc-info';
+        const t = document.createElement('b'); t.className = 'np-lc-title'; t.textContent = host || url;
+        const d = document.createElement('span'); d.className = 'np-lc-desc';
+        const s = document.createElement('small'); s.className = 'np-lc-site'; s.textContent = host;
+        info.append(t, d, s);
+        a.append(thumb, info);
+        const x = document.createElement('button');
+        x.type = 'button'; x.className = 'np-lc-x'; x.title = 'Remove preview'; x.setAttribute('aria-label', 'Remove preview'); x.textContent = '\u00d7';
+        card.append(a, x);
+        if (host) setCardImage(card, 'https://www.google.com/s2/favicons?sz=64&domain=' + encodeURIComponent(host), true);
+        return card;
+      }
+
+      async function fetchLinkMeta(url) {
+        const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+        const timer = ctl ? setTimeout(() => ctl.abort(), 9000) : null;
+        const opts = ctl ? { signal: ctl.signal } : {};
+        try {
+          const yt = youtubeId(url);
+          if (yt) {
+            const meta = { site: 'YouTube', image: 'https://i.ytimg.com/vi/' + yt + '/hqdefault.jpg' };
+            try {
+              const r = await fetch('https://noembed.com/embed?url=' + encodeURIComponent(url), opts);
+              if (r.ok) { const j = await r.json(); if (j && j.title) { meta.title = j.title; meta.description = j.author_name || ''; } }
+            } catch (e) { /* the thumbnail alone still makes a good card */ }
+            return meta;
+          }
+          const r = await fetch('https://api.microlink.io/?url=' + encodeURIComponent(url), opts);
+          if (r.status === 429 || r.status >= 500) throw new Error('preview service busy');
+          const j = await r.json().catch(() => null);
+          const d = j && j.status === 'success' ? j.data : null;
+          if (!d) return {};                      // the page has no preview: keep the plain card
+          return {
+            title: d.title, description: d.description, site: d.publisher,
+            image: d.image && d.image.url, logo: d.logo && d.logo.url
+          };
+        } finally { if (timer) clearTimeout(timer); }
+      }
+
+      function hydrateLinkCard(card) {
+        if (!card || card.dataset.state !== 'pending' || linkFetching.has(card)) return;
+        const url = httpUrl(card.dataset.url);
+        if (!url) return;
+        linkFetching.add(card);
+        fetchLinkMeta(url).then((m) => {
+          linkFetching.delete(card);
+          // The note was switched while we were waiting: leave the card pending, it fills in next time it opens.
+          if (teamMode || !body.contains(card)) return;
+          m = m || {};
+          const title = String(m.title || '').trim();
+          const desc = String(m.description || '').trim();
+          const site = String(m.site || '').trim();
+          if (title) card.querySelector('.np-lc-title').textContent = title.slice(0, 160);
+          card.querySelector('.np-lc-desc').textContent = desc.slice(0, 200);
+          if (site) card.querySelector('.np-lc-site').textContent = site.slice(0, 80);
+          const img = httpsImage(m.image), logo = httpsImage(m.logo);
+          if (img) setCardImage(card, img, false);
+          else if (logo) setCardImage(card, logo, true);
+          card.dataset.state = 'done';
+          // Save the filled-in card, but this is not an edit by the person: keep "last edited" as it was.
+          const note = activeNote();
+          if (note) { note.body = body.innerHTML; saveNotes(); }
+        }).catch(() => { linkFetching.delete(card); });   // offline or rate limited: try again on the next open
+      }
+      function hydrateLinkCards() {
+        body.querySelectorAll('.np-linkcard[data-state="pending"]').forEach(hydrateLinkCard);
+      }
+
+      // The end of the line an <a> sits on, so the card goes under the whole line.
+      function lineEnd(node) {
+        let n = node;
+        while (n.parentNode && n.parentNode !== body) n = n.parentNode;
+        while (n.nextSibling && !(n.nextSibling.nodeType === 1 && BLOCK_RE.test(n.nextSibling.nodeName)) && n.nextSibling.nodeName !== 'BR' && !isCard(n.nextSibling)) n = n.nextSibling;
+        if (n.nextSibling && n.nextSibling.nodeName === 'BR') n = n.nextSibling;
+        return n;
+      }
+
+      function addLinkCards(anchors) {
+        const seen = new Set();
+        anchors.forEach((a) => {
+          const url = httpUrl(a.getAttribute('href'));
+          if (!url || seen.has(url)) return;
+          seen.add(url);
+          let at = lineEnd(a), dup = false;
+          while (isCard(at.nextSibling)) { at = at.nextSibling; if (at.dataset.url === url) dup = true; }   // keep cards from one paste in order
+          if (dup) return;
+          const card = makeLinkCard(url);
+          at.after(card);
+          if (!card.nextSibling) card.after(blankLine());     // somewhere to keep typing under the card
+          hydrateLinkCard(card);
+        });
+      }
+
+      body.addEventListener('paste', (e) => {
+        if (teamMode || body.contentEditable !== 'true') return;        // shared docs stay plain text
+        const cd = e.clipboardData || window.clipboardData;
+        const raw = cd ? cd.getData('text/plain') : '';
+        if (!raw || !/https?:\/\//i.test(raw)) return;                 // ordinary paste: untouched
+        const text = raw.replace(/\s+$/, '').replace(/^\s+(?=https?:)/i, '');
+        const justOneUrl = /^https?:\/\/\S+$/i.test(text);
+        const hasHtml = Array.from((cd && cd.types) || []).indexOf('text/html') >= 0;
+        if (!justOneUrl && hasHtml) return;                              // copied from a web page: keep its own formatting
+        const { html, urls } = linkifyPaste(text);
+        if (!urls.length) return;
+        e.preventDefault();
+        const ok = document.execCommand('insertHTML', false, html + (/<\/a>$/.test(html) ? '&nbsp;' : ''));
+        if (ok === false) document.execCommand('insertText', false, text);
+        const fresh = Array.from(body.querySelectorAll('a[data-np-new]'));
+        fresh.forEach((a) => a.removeAttribute('data-np-new'));
+        if (urls.length <= MAX_LINK_CARDS) addLinkCards(fresh);
+        updateNote();
+      });
+
+      // Click a link (or a card) to open it; the editor itself would only place the caret.
+      body.addEventListener('click', (e) => {
+        const t = e.target;
+        if (!t || !t.closest) return;
+        const x = t.closest('.np-lc-x');
+        if (x) {
+          e.preventDefault();
+          const card = x.closest('.np-linkcard');
+          if (card && body.contentEditable === 'true') { card.remove(); updateNote(); }
+          return;
+        }
+        const a = t.closest('a[href]');
+        if (!a || !body.contains(a)) return;
+        e.preventDefault();
+        const sel = window.getSelection && window.getSelection();
+        if (sel && !sel.isCollapsed && !isCard(a.closest('.np-linkcard'))) return;   // they are selecting text, not following the link
+        const href = httpUrl(a.getAttribute('href'));
+        if (href) window.open(href, '_blank', 'noopener,noreferrer');
+      });
+
+      // A thumbnail that fails to load just goes away; the card falls back to the link icon.
+      body.addEventListener('error', (e) => {
+        const img = e.target;
+        if (img && img.tagName === 'IMG' && img.closest && img.closest('.np-linkcard')) img.remove();
+      }, true);
+
       $('highlight-btn').addEventListener('click', toggleHighlight);
       $('add-subnote-btn').addEventListener('click', () => { if (activeId) addSubnote(activeId); });
       document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => {

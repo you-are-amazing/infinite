@@ -37,7 +37,8 @@
     .ax-new i{color:var(--green)}.ax-new:hover{border-color:var(--green)}
     .ax-sec{display:flex;align-items:center;justify-content:space-between;padding:6px 30px;font-size:12.5px;letter-spacing:.08em;color:var(--muted);font-weight:500;text-transform:uppercase}
     .ax-chats{flex:1;overflow-y:auto;padding:0 20px 12px}
-    .ax-chat{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;border:1px solid transparent;border-radius:10px;background:none;color:var(--muted);font-size:14.5px;text-align:left;margin-bottom:3px}
+    .ax-chat{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;border:1px solid transparent;border-radius:10px;background:none;color:var(--muted);font-size:14.5px;text-align:left;margin-bottom:3px;cursor:pointer;box-sizing:border-box}
+    .ax-chat:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
     .ax-chat span.n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .ax-chat time{font:11.5px 'JetBrains Mono',monospace;color:var(--muted);flex:none}
     .ax-chat:hover{background:var(--surface2)}
@@ -46,6 +47,7 @@
     .ax-chat-del{flex:none;width:26px;height:26px;border:0;border-radius:6px;background:transparent;color:var(--faint);cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s ease,background .15s ease,color .15s ease}
     .ax-chat:hover .ax-chat-del,.ax-chat.on .ax-chat-del,.ax-chat:focus-within .ax-chat-del{opacity:1}
     .ax-chat-del:hover{background:var(--red-soft);color:var(--red)}
+    .ax-chat.on .ax-chat-del i,.ax-chat .ax-chat-del i{color:inherit}
     @media (hover:none){.ax-chat-del{opacity:1}}
     .ax-empty-chats{padding:8px 12px;font-size:13px;color:var(--faint)}
     .ax-foot{border-top:1px solid var(--line-soft);padding:16px 20px;display:flex;align-items:center;gap:12px}
@@ -370,7 +372,7 @@
     var el = $('ax-chats');
     if (!chats.length) { el.innerHTML = '<div class="ax-empty-chats">No conversations yet.</div>'; return; }
     el.innerHTML = chats.map(function (c) {
-      return '<button type="button" class="ax-chat' + (cur && c.id === cur.id ? ' on' : '') + '" data-id="' + c.id + '"><i class="fa-regular fa-comment-dots"></i><span class="n">' + esc(c.title) + '</span><time>' + ago(c.ts) + '</time><button type="button" class="ax-chat-del" data-del="' + c.id + '" aria-label="Delete conversation" title="Delete"><i class="fa-solid fa-trash-can"></i></button></button>';
+      return '<div class="ax-chat' + (cur && c.id === cur.id ? ' on' : '') + '" data-id="' + esc(c.id) + '" role="button" tabindex="0">' + '<i class="fa-regular fa-comment-dots"></i><span class="n">' + esc(c.title) + '</span><time>' + ago(c.ts) + '</time>' + '<button type="button" class="ax-chat-del" data-del="' + esc(c.id) + '" aria-label="Delete conversation" title="Delete this conversation"><i class="fa-solid fa-trash-can"></i></button></div>';
     }).join('');
   }
   function describe(a) {
@@ -587,6 +589,7 @@
     function deleteChat(id) {
       var idx = chats.findIndex(function (c) { return c.id === id; });
       if (idx === -1) return;
+      if (!window.confirm('Delete the conversation "' + chats[idx].title + '"? This cannot be undone.')) return;
       chats.splice(idx, 1);
       if (cur && cur.id === id) { cur = null; drawThread(); }
       saveChats(); drawChats(); toast('Conversation deleted');
@@ -605,6 +608,11 @@
       if (del) { e.stopPropagation(); deleteChat(del.dataset.del); return; }
       var b = e.target.closest('.ax-chat'); if (!b || busy) return;
       cur = chats.filter(function (c) { return c.id === b.dataset.id; })[0] || null; drawChats(); drawThread();
+    });
+    $('ax-chats').addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var row = e.target.classList && e.target.classList.contains('ax-chat') ? e.target : null;
+      if (row) { e.preventDefault(); row.click(); }
     });
     $('ax-del-all').addEventListener('click', function (e) {
       e.stopPropagation(); deleteAllChats();
