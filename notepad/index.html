@@ -59,6 +59,13 @@
     #np-fmt .np-sw { width: 24px; height: 24px; min-width: 0; padding: 0; border-radius: 50%; border: 2px solid rgba(255,255,255,.18); }
     #np-fmt .np-sw:hover { border-color: #fff; transform: scale(1.12); background: inherit; }
     #np-fmt .np-sw.np-none { background: transparent; color: var(--muted, #7e8ca3); font-size: 12px; line-height: 20px; }
+    .np-tools .np-tt { position: relative; display: inline-flex; }
+    .np-tools .np-pop { position: absolute; left: 0; top: calc(100% + 8px); z-index: 70; display: none; flex-wrap: wrap; gap: 7px; width: 176px; padding: 10px; background: var(--surface2, #141c2b); border: 1px solid var(--line, #223047); border-radius: 11px; box-shadow: 0 8px 26px rgba(0,0,0,.5); }
+    .np-tools .np-pop.open { display: flex; }
+    .np-tools .np-sw { width: 24px; min-width: 0; height: 24px; padding: 0; border-radius: 50%; border: 2px solid rgba(255,255,255,.18); }
+    .np-tools .np-sw:hover { border-color: #fff; transform: scale(1.12); }
+    .np-tools .np-sw.np-none { background: transparent; color: var(--muted, #7e8ca3); font-size: 12px; line-height: 20px; }
+    .np-tools .np-pop-label { flex: 1 0 100%; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #7e8ca3); }
     #np-fmt .np-pop-label { flex: 1 0 100%; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #7e8ca3); }
   </style>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
@@ -154,7 +161,8 @@
             <button type="button" data-command="underline" aria-label="Underline"><u>U</u></button>
             <button type="button" data-command="insertUnorderedList" aria-label="Bulleted list">&bull;</button>
             <button type="button" data-command="formatBlock" data-value="blockquote" aria-label="Quote">&ldquo;</button>
-            <button type="button" id="highlight-btn" aria-label="Highlight" style="width:auto; padding:0 12px;">Highlight</button>
+            <span class="np-tt" data-tt="color"><button type="button" id="tt-color-btn" aria-label="Text colour" title="Text colour" style="width:auto; padding:0 12px;"><i class="fa-solid fa-font" style="margin-right:6px;"></i>Colour <i class="fa-solid fa-caret-down" style="margin-left:4px; font-size:10px;"></i></button><div class="np-pop" data-for="color"></div></span>
+            <span class="np-tt" data-tt="hl"><button type="button" id="tt-hl-btn" aria-label="Highlight colour" title="Highlight colour" style="width:auto; padding:0 12px;"><i class="fa-solid fa-highlighter" style="margin-right:6px;"></i>Marker <i class="fa-solid fa-caret-down" style="margin-left:4px; font-size:10px;"></i></button><div class="np-pop" data-for="hl"></div></span>
             <button type="button" id="add-subnote-btn" aria-label="Add subnote" style="width:auto; padding:0 12px;"><i class="fa-solid fa-plus" style="margin-right:6px;"></i>Subnote</button>
             <button type="button" id="share-team-btn" aria-label="Share with team" style="width:auto; padding:0 12px; margin-left:auto;" hidden><i class="fa-solid fa-share-nodes" style="margin-right:6px;"></i>Share with team</button>
           </div>
@@ -1793,6 +1801,7 @@ function countAllNotes(arr) {
           if (open) { b.classList.add('open', 'on'); fmt.querySelector('.np-pop[data-for="' + b.dataset.pop + '"]').classList.add('open'); }
           return;
         }
+        if (b.dataset.v === 'blockquote' && toggleOffQuote()) { placeFmt(); return; }
         if (b.dataset.c) {
           document.execCommand('styleWithCSS', false, false);
           document.execCommand(b.dataset.c, false, b.dataset.v || null);
@@ -1818,10 +1827,120 @@ function countAllNotes(arr) {
       const topTools = document.querySelector('.np-tools');
       if (topTools) topTools.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
 
-      $('highlight-btn').addEventListener('click', toggleHighlight);
+      // colour palettes in the top toolbar too (same colours as the floating one)
+      if (topTools) {
+        const ttFill = (kind, list, none) => {
+          const pop = topTools.querySelector('.np-pop[data-for="' + kind + '"]');
+          if (!pop) return;
+          pop.innerHTML = '<span class="np-pop-label">' + (kind === 'color' ? 'Text colour' : 'Highlight') + '</span>' + swatches(list, kind) + none;
+        };
+        ttFill('color', FMT_TEXT, '<button type="button" class="np-sw np-none" data-color="" title="Default colour">A</button>');
+        ttFill('hl', FMT_HL, '<button type="button" class="np-sw np-none" data-hl="none" title="Remove highlight">&times;</button>');
+        const ttClose = () => topTools.querySelectorAll('.np-pop').forEach((el) => el.classList.remove('open'));
+        const ttSync = () => topTools.querySelectorAll('.np-tt').forEach((el) => { el.hidden = !!teamMode; });   // colours are not shared in team docs
+        ttSync();
+        topTools.addEventListener('pointerover', ttSync);
+        topTools.addEventListener('click', (e) => {
+          const b = e.target.closest && e.target.closest('button');
+          if (!b || body.contentEditable !== 'true') return;
+          const wrap = b.closest('.np-tt');
+          if (!wrap) return;
+          if (b.id === 'tt-color-btn' || b.id === 'tt-hl-btn') {
+            const pop = wrap.querySelector('.np-pop'), open = !pop.classList.contains('open');
+            ttClose();
+            if (open) pop.classList.add('open');
+            return;
+          }
+          if (b.hasAttribute('data-color')) {
+            const col = b.dataset.color || getComputedStyle(body).color;
+            document.execCommand('styleWithCSS', false, true);
+            document.execCommand('foreColor', false, col);
+            document.execCommand('styleWithCSS', false, false);
+            body.focus(); updateNote();
+          } else if (b.hasAttribute('data-hl')) {
+            applyHighlight(b.dataset.hl === 'none' ? null : b.dataset.hl);
+          }
+          ttClose();
+        });
+        document.addEventListener('mousedown', (e) => { if (!e.target.closest || !e.target.closest('.np-tt')) ttClose(); });
+      }
+
+      /* ---------- leaving a quote ----------
+       * Enter or Backspace on an EMPTY quote line turns that line into a normal line (the rest of the
+       * quote, if any, stays quoted below it), and the Quote button now toggles the quote off again.
+       */
+      function closestQuote(node) {
+        while (node && node !== body) {
+          if (node.nodeType === 1 && node.tagName === 'BLOCKQUOTE') return node;
+          node = node.parentNode;
+        }
+        return null;
+      }
+      const quoteIsBlank = (n) => !!n && !/\S/.test(n.textContent || '') && !(n.querySelector && n.querySelector('img, .np-linkcard'));
+
+      function exitQuoteLine(bq, line) {
+        const fresh = document.createElement('div');
+        fresh.appendChild(document.createElement('br'));
+        let rest = null;
+        if (line && line.parentNode === bq) {
+          const tail = [];
+          for (let n = line.nextSibling; n; n = n.nextSibling) tail.push(n);
+          if (tail.some((n) => (n.nodeType === 1 && (n.tagName !== 'BR' || n.nextSibling)) || /\S/.test(n.nodeValue || ''))) {
+            rest = bq.cloneNode(false);
+            tail.forEach((n) => rest.appendChild(n));
+          }
+          line.remove();
+        } else {
+          while (bq.firstChild) bq.removeChild(bq.firstChild);
+        }
+        bq.after(fresh);
+        if (rest) fresh.after(rest);
+        if (quoteIsBlank(bq)) bq.remove();
+        const r = document.createRange();
+        r.setStart(fresh, 0); r.collapse(true);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      }
+
+      function leaveEmptyQuote(e) {
+        if (body.contentEditable !== 'true') return;
+        const sel = window.getSelection();
+        if (!sel.rangeCount || !sel.isCollapsed) return;
+        const bq = closestQuote(sel.anchorNode);
+        if (!bq) return;
+        let line = sel.anchorNode;
+        if (line === bq) line = bq.childNodes[sel.anchorOffset] || bq.childNodes[sel.anchorOffset - 1] || null;
+        else while (line && line.parentNode !== bq) line = line.parentNode;
+        if (!(line ? quoteIsBlank(line) : quoteIsBlank(bq))) return;       // only an empty line leaves the quote
+        e.preventDefault();
+        exitQuoteLine(bq, line);
+        updateNote();
+      }
+      body.addEventListener('keydown', (e) => {
+        if ((e.key !== 'Enter' && e.key !== 'Backspace') || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+        leaveEmptyQuote(e);
+      });
+      // on-screen / mobile keyboards do not send normal key events, so listen for the edit itself too
+      body.addEventListener('beforeinput', (e) => {
+        if (e.inputType === 'insertParagraph' || e.inputType === 'deleteContentBackward') leaveEmptyQuote(e);
+      });
+
+      // Quote button on a line that is already quoted: take the quote off
+      function toggleOffQuote() {
+        const sel = window.getSelection();
+        if (!sel.rangeCount) return false;
+        const bq = closestQuote(sel.anchorNode);
+        if (!bq) return false;
+        while (bq.firstChild) bq.parentNode.insertBefore(bq.firstChild, bq);
+        bq.remove();
+        body.focus();
+        updateNote();
+        return true;
+      }
+
       $('add-subnote-btn').addEventListener('click', () => { if (activeId) addSubnote(activeId); });
       document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => {
         if (body.contentEditable === 'false') return;   // read-only: the toolbar is disabled, and this is the belt
+        if (button.dataset.value === 'blockquote' && toggleOffQuote()) return;
         document.execCommand(button.dataset.command, false, button.dataset.value || null);
         body.focus();
         updateNote();
