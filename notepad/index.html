@@ -46,6 +46,20 @@
     #np-img-bar button[data-a="del"]:hover { background: var(--red-soft, rgba(255,90,90,.15)); color: var(--red, #ff6b6b); }
     #np-img-bar .np-pct { min-width: 42px; text-align: center; font-size: 12px; color: var(--muted, #8b95a8); }
     #np-img-bar .np-sep { width: 1px; height: 18px; margin: 0 3px; background: var(--line, #2a3347); }
+
+    /* Floating text toolbar (appears over selected text) */
+    #np-fmt { position: fixed; z-index: 70; display: none; align-items: center; gap: 2px; padding: 4px; background: var(--surface2, #141c2b); border: 1px solid var(--line, #223047); border-radius: 11px; box-shadow: 0 8px 26px rgba(0,0,0,.5); user-select: none; -webkit-user-select: none; }
+    #np-fmt button { position: relative; min-width: 30px; height: 30px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text, #e9eff7); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+    #np-fmt button:hover, #np-fmt button.on { background: var(--surface3, #1a2436); color: var(--lav, #8f8ff0); }
+    #np-fmt .np-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line, #223047); }
+    #np-fmt .np-bar { position: absolute; left: 7px; right: 7px; bottom: 3px; height: 3px; border-radius: 2px; background: var(--np-ink, #f87171); }
+    #np-fmt .np-pop { position: absolute; left: 0; top: calc(100% + 8px); display: none; flex-wrap: wrap; gap: 7px; width: 176px; padding: 10px; background: var(--surface2, #141c2b); border: 1px solid var(--line, #223047); border-radius: 11px; box-shadow: 0 8px 26px rgba(0,0,0,.5); }
+    #np-fmt.flip .np-pop { top: auto; bottom: calc(100% + 8px); }
+    #np-fmt .np-pop.open { display: flex; }
+    #np-fmt .np-sw { width: 24px; height: 24px; min-width: 0; padding: 0; border-radius: 50%; border: 2px solid rgba(255,255,255,.18); }
+    #np-fmt .np-sw:hover { border-color: #fff; transform: scale(1.12); background: inherit; }
+    #np-fmt .np-sw.np-none { background: transparent; color: var(--muted, #7e8ca3); font-size: 12px; line-height: 20px; }
+    #np-fmt .np-pop-label { flex: 1 0 100%; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #7e8ca3); }
   </style>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
@@ -626,29 +640,85 @@ function countAllNotes(arr) {
         parent.removeChild(mark);
       }
 
-      function toggleHighlight() {
-        if (body.contentEditable === 'false') return;
-        const sel = window.getSelection();
-        if (!sel.rangeCount || sel.isCollapsed) { body.focus(); return; }
-        const range = sel.getRangeAt(0);
-        if (!body.contains(range.commonAncestorContainer)) { body.focus(); return; }
-
-        const existingMark = closestHighlight(sel.anchorNode);
-        if (existingMark) {
-          unwrapMark(existingMark);
-        } else {
-          const mark = document.createElement('mark');
-          mark.className = 'note-highlight';
-          try { range.surroundContents(mark); }
-          catch (error) {
-            const frag = range.extractContents();
-            mark.appendChild(frag);
-            range.insertNode(mark);
+      /* ---------- highlighter ----------
+       * Every selected piece of text gets its own <mark>, so it works over several lines, partly
+       * over an existing highlight, and keeps the selection afterwards (you can stack bold, colour...).
+       */
+      function selectedPieces(range) {
+        const root = range.commonAncestorContainer, nodes = [];
+        if (root.nodeType === 3) nodes.push(root);
+        else {
+          const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          let n;
+          while ((n = w.nextNode())) {
+            if (!n.nodeValue || !range.intersectsNode(n)) continue;
+            if (n.parentNode.closest && n.parentNode.closest('.np-linkcard')) continue;
+            nodes.push(n);
           }
         }
-        sel.removeAllRanges();
-        body.focus();
+        const pieces = [];
+        nodes.forEach((n) => {
+          const a = n === range.startContainer ? range.startOffset : 0;
+          const b = n === range.endContainer ? range.endOffset : n.nodeValue.length;
+          if (a >= b) return;
+          if (nodes.length > 1 && !/\S/.test(n.nodeValue.slice(a, b))) return;   // blank gaps between lines
+          pieces.push({ n, a, b });
+        });
+        return pieces;
+      }
+
+      function currentEditRange() {
+        if (body.contentEditable !== 'true') return null;
+        const sel = window.getSelection();
+        if (!sel.rangeCount || sel.isCollapsed) return null;
+        const range = sel.getRangeAt(0);
+        return body.contains(range.commonAncestorContainer) ? range : null;
+      }
+
+      // color: '' = the default yellow, '#rrggbb' = that colour, null = remove the highlight
+      function applyHighlight(color) {
+        const range = currentEditRange();
+        if (!range) { body.focus(); return; }
+        const pieces = selectedPieces(range);
+        if (!pieces.length) return;
+        let first = null, last = null;
+        pieces.forEach((p) => {
+          const existing = closestHighlight(p.n);
+          if (color === null) {
+            if (existing) unwrapMark(existing);
+            first = first || p.n; last = p.n;
+            return;
+          }
+          let target = existing;
+          if (!target) {
+            let node = p.n;
+            if (p.b < node.nodeValue.length) node.splitText(p.b);
+            if (p.a > 0) node = node.splitText(p.a);
+            target = document.createElement('mark');
+            target.className = 'note-highlight';
+            node.parentNode.insertBefore(target, node);
+            target.appendChild(node);
+          }
+          if (color) target.style.background = color; else target.style.removeProperty('background');
+          if (!target.getAttribute('style')) target.removeAttribute('style');
+          first = first || target; last = target;
+        });
+        if (document.activeElement !== body) body.focus();
         updateNote();
+        if (first && last && first.isConnected && last.isConnected) {      // keep the text selected so more formatting can be stacked
+          const r = document.createRange();
+          r.setStartBefore(first); r.setEndAfter(last);
+          const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        }
+      }
+
+      // the "Highlight" button: highlight the selection, or remove it if it is all highlighted already
+      function toggleHighlight() {
+        const range = currentEditRange();
+        if (!range) { body.focus(); return; }
+        const pieces = selectedPieces(range);
+        if (!pieces.length) return;
+        applyHighlight(pieces.every((p) => closestHighlight(p.n)) ? null : '');
       }
 
       // =====================================================================
@@ -1650,6 +1720,103 @@ function countAllNotes(arr) {
         const img = e.target;
         if (img && img.tagName === 'IMG' && img.closest && img.closest('.np-linkcard')) img.remove();
       }, true);
+
+      /* ---------- floating text toolbar ----------
+       * Select text in a note and a small toolbar appears over it: bold / italic / underline /
+       * strike, list, quote, text colour, highlight colour, clear formatting. Colours are bright
+       * shades picked to stay readable on the dark theme. Team docs only keep plain formatting
+       * (colours are not shared), so the two colour buttons are hidden there.
+       */
+      const FMT_TEXT = ['#f87171', '#fb923c', '#fbbf24', '#4ade80', '#2dd4bf', '#38bdf8', '#818cf8', '#c084fc', '#f472b6', '#94a3b8'];
+      const FMT_HL = ['', '#bbf7d0', '#a5f3fc', '#bfdbfe', '#ddd6fe', '#fbcfe8', '#fed7aa', '#fecaca'];
+      const swatches = (list, kind) => list.map((c) =>
+        '<button type="button" class="np-sw" data-' + kind + '="' + c + '" style="background:' + (c || '#f8d878') + '" aria-label="' + kind + ' ' + (c || 'yellow') + '"></button>').join('');
+
+      const fmt = document.createElement('div');
+      fmt.id = 'np-fmt';
+      fmt.setAttribute('role', 'toolbar');
+      fmt.setAttribute('aria-label', 'Format selected text');
+      fmt.innerHTML =
+        '<button type="button" data-c="bold" title="Bold"><b>B</b></button>' +
+        '<button type="button" data-c="italic" title="Italic"><i>I</i></button>' +
+        '<button type="button" data-c="underline" title="Underline"><u>U</u></button>' +
+        '<button type="button" data-c="strikeThrough" title="Strikethrough"><s>S</s></button>' +
+        '<i class="np-sep"></i>' +
+        '<button type="button" data-c="insertUnorderedList" title="Bulleted list"><i class="fa-solid fa-list-ul"></i></button>' +
+        '<button type="button" data-c="formatBlock" data-v="blockquote" title="Quote"><i class="fa-solid fa-quote-left"></i></button>' +
+        '<i class="np-sep"></i>' +
+        '<button type="button" data-pop="color" data-colors title="Text colour"><i class="fa-solid fa-font"></i><span class="np-bar"></span></button>' +
+        '<button type="button" data-pop="hl" data-colors title="Highlight colour"><i class="fa-solid fa-highlighter"></i></button>' +
+        '<button type="button" data-c="removeFormat" title="Clear formatting"><i class="fa-solid fa-eraser"></i></button>' +
+        '<div class="np-pop" data-for="color"><span class="np-pop-label">Text colour</span>' + swatches(FMT_TEXT, 'color') +
+          '<button type="button" class="np-sw np-none" data-color="" title="Default colour">A</button></div>' +
+        '<div class="np-pop" data-for="hl"><span class="np-pop-label">Highlight</span>' + swatches(FMT_HL, 'hl') +
+          '<button type="button" class="np-sw np-none" data-hl="none" title="Remove highlight">&times;</button></div>';
+      document.body.appendChild(fmt);
+
+      const closePops = () => fmt.querySelectorAll('.np-pop, button[data-pop]').forEach((el) => el.classList.remove('open', 'on'));
+
+      function hideFmt() { fmt.style.display = 'none'; closePops(); }
+
+      function placeFmt() {
+        const range = !imgDrag && !selImg ? currentEditRange() : null;
+        if (!range || !selectedPieces(range).length) { hideFmt(); return; }
+        const r = range.getBoundingClientRect();
+        if (!r.width && !r.height) { hideFmt(); return; }
+        const team = !!teamMode;
+        fmt.querySelectorAll('[data-colors]').forEach((el) => { el.hidden = team; });
+        if (team) closePops();
+        fmt.style.display = 'flex';
+        const w = fmt.offsetWidth, h = fmt.offsetHeight;
+        const above = r.top > 70;
+        fmt.classList.toggle('flip', !above);
+        fmt.style.top = Math.max(8, above ? r.top - h - 10 : r.bottom + 10) + 'px';
+        fmt.style.left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8) + 'px';
+      }
+
+      let fmtMouseDown = false, fmtRaf = 0;
+      const queueFmt = () => { cancelAnimationFrame(fmtRaf); fmtRaf = requestAnimationFrame(() => { if (!fmtMouseDown) placeFmt(); }); };
+      body.addEventListener('mousedown', () => { fmtMouseDown = true; });
+      document.addEventListener('mouseup', () => { if (fmtMouseDown) { fmtMouseDown = false; setTimeout(placeFmt, 0); } });
+      document.addEventListener('selectionchange', () => { if (currentEditRange() === null) hideFmt(); else queueFmt(); });
+      body.addEventListener('keyup', queueFmt);
+      window.addEventListener('scroll', () => { if (fmt.style.display !== 'none') placeFmt(); }, true);
+      window.addEventListener('resize', queueFmt);
+
+      fmt.addEventListener('mousedown', (e) => e.preventDefault());       // keep the text selected while you click
+      fmt.addEventListener('click', (e) => {
+        const b = e.target.closest && e.target.closest('button');
+        if (!b || body.contentEditable !== 'true') return;
+        if (b.dataset.pop) {
+          const open = !b.classList.contains('open');
+          closePops();
+          if (open) { b.classList.add('open', 'on'); fmt.querySelector('.np-pop[data-for="' + b.dataset.pop + '"]').classList.add('open'); }
+          return;
+        }
+        if (b.dataset.c) {
+          document.execCommand('styleWithCSS', false, false);
+          document.execCommand(b.dataset.c, false, b.dataset.v || null);
+        } else if (b.hasAttribute('data-color')) {
+          const c = b.dataset.color || getComputedStyle(body).color;      // "A" = back to the normal text colour
+          document.execCommand('styleWithCSS', false, true);
+          document.execCommand('foreColor', false, c);
+          document.execCommand('styleWithCSS', false, false);
+          fmt.style.setProperty('--np-ink', c);
+          closePops();
+        } else if (b.hasAttribute('data-hl')) {
+          applyHighlight(b.dataset.hl === 'none' ? null : b.dataset.hl);
+          closePops();
+          placeFmt();
+          return;
+        }
+        body.focus();
+        updateNote();
+        placeFmt();
+      });
+
+      // clicking a toolbar button above the note must not drop the selection either
+      const topTools = document.querySelector('.np-tools');
+      if (topTools) topTools.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
 
       $('highlight-btn').addEventListener('click', toggleHighlight);
       $('add-subnote-btn').addEventListener('click', () => { if (activeId) addSubnote(activeId); });

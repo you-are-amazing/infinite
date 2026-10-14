@@ -4958,6 +4958,131 @@ body.auth-lock {
   cursor: not-allowed;
 }
 
+/* ---- floating selection toolbar ---- */
+.np-float-toolbar {
+  position: absolute;
+  z-index: 55;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 6px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.45);
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: npFloatIn .12s ease-out;
+}
+@keyframes npFloatIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.np-float-toolbar.visible { display: flex; }
+.np-float-toolbar button {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  position: relative;
+}
+.np-float-toolbar button:hover {
+  background: var(--surface3);
+  color: var(--lav);
+}
+.np-float-toolbar .np-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--line);
+  flex-shrink: 0;
+}
+/* color picker trigger */
+.np-float-toolbar .np-color-btn {
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.np-float-toolbar .np-color-btn .np-color-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  flex-shrink: 0;
+}
+.np-float-toolbar .np-color-btn .np-color-dot.text-dot { background: var(--text); }
+.np-float-toolbar .np-color-btn .np-color-dot.hl-dot { background: #f8d878; }
+.np-float-toolbar .np-color-btn i.fa-caret-down { font-size: 10px; color: var(--muted); margin-left: 1px; }
+
+/* color palette dropdown */
+.np-color-palette {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 56;
+  display: none;
+  padding: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.5);
+  min-width: 200px;
+  animation: npFloatIn .12s ease-out;
+}
+.np-color-palette.visible { display: block; }
+.np-color-palette .np-cp-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: var(--faint);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+.np-color-palette .np-cp-label + .np-cp-label { margin-top: 10px; }
+.np-color-palette .np-cp-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 28px);
+  gap: 5px;
+}
+.np-color-palette .np-cp-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color .12s, transform .1s;
+  position: relative;
+}
+.np-color-palette .np-cp-swatch:hover {
+  border-color: var(--text);
+  transform: scale(1.12);
+}
+.np-color-palette .np-cp-swatch.active {
+  border-color: var(--lav);
+}
+.np-color-palette .np-cp-swatch.np-cp-none {
+  background: var(--surface);
+  border-color: var(--line);
+}
+.np-color-palette .np-cp-swatch.np-cp-none::before {
+  content: '×';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
 .share-dialog details {
   border: 1px dashed var(--line);
   border-radius: 9px;
