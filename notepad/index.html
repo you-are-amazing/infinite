@@ -33,6 +33,19 @@
     @media (hover: none) { #note-body .np-lc-x { opacity: 1; } }
     @media (max-width: 520px) { #note-body .np-lc-thumb { width: 92px; } }
     #note-body.doc-locked .np-lc-x { display: none; }
+
+    /* Pasted images: always fit inside the note, click one to resize it */
+    #note-body :not(.np-lc-thumb) > img { display: block; max-width: 100%; height: auto; margin: 10px 0; border-radius: 8px; cursor: pointer; }
+    #np-img-box { position: fixed; z-index: 60; display: none; box-sizing: border-box; border: 2px solid var(--lav, #8b8bff); border-radius: 8px; pointer-events: none; }
+    #np-img-box .np-h { position: absolute; right: -8px; width: 14px; height: 14px; box-sizing: border-box; background: #fff; border: 2px solid var(--lav, #8b8bff); border-radius: 4px; pointer-events: auto; touch-action: none; }
+    #np-img-box .np-h.ne { top: -8px; cursor: nesw-resize; }
+    #np-img-box .np-h.se { bottom: -8px; cursor: nwse-resize; }
+    #np-img-bar { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 3px; padding: 4px; background: var(--surface2, #1b2233); border: 1px solid var(--line, #2a3347); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.35); pointer-events: auto; white-space: nowrap; user-select: none; -webkit-user-select: none; }
+    #np-img-bar button { min-width: 30px; height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text, #e8ecf4); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+    #np-img-bar button:hover { background: var(--surface, #121826); color: var(--lav, #8b8bff); }
+    #np-img-bar button[data-a="del"]:hover { background: var(--red-soft, rgba(255,90,90,.15)); color: var(--red, #ff6b6b); }
+    #np-img-bar .np-pct { min-width: 42px; text-align: center; font-size: 12px; color: var(--muted, #8b95a8); }
+    #np-img-bar .np-sep { width: 1px; height: 18px; margin: 0 3px; background: var(--line, #2a3347); }
   </style>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" defer></script>
@@ -412,8 +425,19 @@ function findNoteById(arr, id) {
       }
       const stampKey = (teamId, docId) => teamId + '/' + docId;
 
+      let bigNotesWarned = false;
       function saveNotes() {
-        localStorage.setItem(storageKey, JSON.stringify(notes));
+        try {
+          const json = JSON.stringify(notes);
+          localStorage.setItem(storageKey, json);
+          // every note is synced to the cloud as ONE document (about 1 MB max), so warn before images push it over
+          if (json.length > 800 * 1024 && !bigNotesWarned) {
+            bigNotesWarned = true;
+            alert('Your notes are getting large (many or big images). Cloud sync stops working around 1 MB, so please shrink or remove some images.');
+          }
+        } catch (error) {
+          alert('Storage is full - this change could not be saved. Remove or shrink some images and try again.');
+        }
         renderList();
       }
 
@@ -1393,7 +1417,195 @@ function countAllNotes(arr) {
         });
       }
 
+      /* ---------- images: paste / drop, auto-fit, resize ----------
+       * Paste (Ctrl+V) or drop an image into one of YOUR notes. It is shrunk to a small, sync-friendly
+       * file and always fits the note width. Click it to get corner handles (drag to resize) and a
+       * little bar: smaller / bigger, 25-100% presets, Fit, delete. The width is saved on the <img>
+       * itself (style="width:..px"), so it stays that size next time. Team docs stay plain text.
+       */
+      const IMG_MAX_EDGE = 1100;                 // longest side after shrinking (px)
+      const IMG_TARGET_BYTES = 140 * 1024;       // aim for at most this much per image (notes sync as one ~1 MB doc)
+      const IMG_FILE_RE = /^image\/(png|jpe?g|gif|webp|bmp)$/i;
+      let selImg = null;
+
+      const imgBox = document.createElement('div');
+      imgBox.id = 'np-img-box';
+      imgBox.innerHTML =
+        '<span class="np-h ne"></span><span class="np-h se"></span>' +
+        '<div id="np-img-bar">' +
+          '<button type="button" data-a="-" title="Smaller">&minus;</button>' +
+          '<span class="np-pct">100%</span>' +
+          '<button type="button" data-a="+" title="Bigger">+</button>' +
+          '<i class="np-sep"></i>' +
+          '<button type="button" data-w="25">25%</button><button type="button" data-w="50">50%</button>' +
+          '<button type="button" data-w="75">75%</button><button type="button" data-w="100">100%</button>' +
+          '<i class="np-sep"></i>' +
+          '<button type="button" data-a="del" title="Remove image"><i class="fa-solid fa-trash"></i></button>' +
+        '</div>';
+      document.body.appendChild(imgBox);
+      const imgBar = imgBox.querySelector('#np-img-bar');
+      const imgPct = imgBox.querySelector('.np-pct');
+
+      try { document.execCommand('enableObjectResizing', false, false); } catch (e) { /* Firefox's own handles would clash with ours */ }
+
+      const canEditImg = () => !teamMode && body.contentEditable === 'true';
+      const isNoteImg = (el) => !!(el && el.tagName === 'IMG' && body.contains(el) && !(el.closest && el.closest('.np-linkcard')));
+
+      // width the image may use = the content width of the block it sits in
+      function imgAvail(img) {
+        let p = img.parentElement;
+        while (p && p !== body && p.clientWidth === 0) p = p.parentElement;
+        p = p || body;
+        const cs = getComputedStyle(p);
+        return Math.max(60, p.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0));
+      }
+
+      function placeImgTools() {
+        if (!selImg || !selImg.isConnected) { imgBox.style.display = 'none'; return; }
+        const r = selImg.getBoundingClientRect();
+        if (!r.width || r.bottom < 0 || r.top > window.innerHeight) { imgBox.style.display = 'none'; return; }
+        imgBox.style.display = 'block';
+        imgBox.style.left = r.left + 'px';
+        imgBox.style.top = r.top + 'px';
+        imgBox.style.width = r.width + 'px';
+        imgBox.style.height = r.height + 'px';
+        imgBar.style.top = r.top < 56 ? '8px' : '-46px';               // above the image, or inside it when there is no room
+        imgPct.textContent = Math.round(r.width / imgAvail(selImg) * 100) + '%';
+      }
+
+      function selectImg(img) {
+        selImg = img;
+        const sel = window.getSelection && window.getSelection();
+        if (sel) { const r = document.createRange(); r.selectNode(img); sel.removeAllRanges(); sel.addRange(r); }   // so Delete removes it
+        placeImgTools();
+      }
+      function deselectImg() { selImg = null; placeImgTools(); }
+
+      function setImgWidth(px) {
+        if (!selImg) return;
+        px = Math.round(Math.max(40, Math.min(px, imgAvail(selImg))));
+        selImg.style.width = px + 'px';
+        selImg.style.height = 'auto';
+        selImg.removeAttribute('width'); selImg.removeAttribute('height');
+        placeImgTools();
+      }
+      const imgWidth = () => (selImg ? selImg.getBoundingClientRect().width : 0);
+
+      // drag the corner handles
+      let imgDrag = null;
+      imgBox.addEventListener('pointerdown', (e) => {
+        const h = e.target.closest && e.target.closest('.np-h');
+        if (!h || !selImg) return;
+        e.preventDefault(); e.stopPropagation();
+        imgDrag = { x: e.clientX, w: imgWidth() };
+        try { h.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      });
+      imgBox.addEventListener('pointermove', (e) => { if (imgDrag) setImgWidth(imgDrag.w + (e.clientX - imgDrag.x)); });
+      const endImgDrag = () => { if (!imgDrag) return; imgDrag = null; updateNote(); };
+      imgBox.addEventListener('pointerup', endImgDrag);
+      imgBox.addEventListener('pointercancel', endImgDrag);
+
+      // toolbar buttons (mousedown is cancelled so the image stays selected)
+      imgBar.addEventListener('mousedown', (e) => e.preventDefault());
+      imgBar.addEventListener('click', (e) => {
+        const b = e.target.closest && e.target.closest('button');
+        if (!b || !selImg) return;
+        if (b.dataset.w) setImgWidth(imgAvail(selImg) * (+b.dataset.w / 100));
+        else if (b.dataset.a === '-') setImgWidth(imgWidth() * 0.8);
+        else if (b.dataset.a === '+') setImgWidth(imgWidth() * 1.25);
+        else if (b.dataset.a === 'del') { const gone = selImg; deselectImg(); gone.remove(); }
+        updateNote();
+      });
+
+      // select / deselect
+      body.addEventListener('click', (e) => {
+        if (isNoteImg(e.target) && canEditImg()) selectImg(e.target); else if (selImg) deselectImg();
+      });
+      document.addEventListener('mousedown', (e) => {
+        if (selImg && !imgBox.contains(e.target) && !body.contains(e.target)) deselectImg();
+      });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && selImg) deselectImg(); });
+      window.addEventListener('scroll', placeImgTools, true);
+      window.addEventListener('resize', placeImgTools);
+      new MutationObserver(() => { if (selImg && !selImg.isConnected) deselectImg(); else placeImgTools(); })
+        .observe(body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['style'] });
+
+      // ----- getting the picture in -----
+      function readAsDataUrl(file) {
+        return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+      }
+      function loadImg(file) {
+        return new Promise((res, rej) => {
+          const url = URL.createObjectURL(file), im = new Image();
+          im.onload = () => { URL.revokeObjectURL(url); res(im); };
+          im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('bad image')); };
+          im.src = url;
+        });
+      }
+      let webpOk = null;
+      async function shrinkImage(file) {
+        if (file.type === 'image/gif' && file.size <= IMG_TARGET_BYTES) return readAsDataUrl(file);    // keep small GIFs animated
+        const im = await loadImg(file);
+        if (webpOk === null) webpOk = document.createElement('canvas').toDataURL('image/webp').indexOf('data:image/webp') === 0;
+        const type = webpOk ? 'image/webp' : 'image/jpeg';
+        const w = im.naturalWidth, h = im.naturalHeight;
+        let scale = Math.min(1, IMG_MAX_EDGE / Math.max(w, h)), q = 0.85, out = '';
+        for (let i = 0; i < 7; i++) {
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(w * scale)); c.height = Math.max(1, Math.round(h * scale));
+          const ctx = c.getContext('2d');
+          if (!webpOk) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
+          ctx.drawImage(im, 0, 0, c.width, c.height);
+          out = c.toDataURL(type, q);
+          if (out.length * 0.75 <= IMG_TARGET_BYTES) break;
+          q = Math.max(0.5, q - 0.1); scale *= 0.85;
+        }
+        return out;
+      }
+
+      async function insertImages(files) {
+        for (const f of files) {
+          let src;
+          try { src = await shrinkImage(f); } catch (err) { alert('Could not read that image.'); continue; }
+          body.focus();
+          const ok = document.execCommand('insertHTML', false, '<img alt="" data-np-new="1" src="' + src + '">');
+          const img = body.querySelector('img[data-np-new]');
+          if (!img) { if (ok === false) alert('Could not add the image here.'); continue; }
+          img.removeAttribute('data-np-new');
+          if (!img.nextSibling) img.after(blankLine());                  // somewhere to keep typing under the image
+          updateNote();
+          selectImg(img);
+        }
+      }
+
       body.addEventListener('paste', (e) => {
+        if (teamMode || body.contentEditable !== 'true') return;
+        const cd = e.clipboardData;
+        const files = cd ? Array.from(cd.files || []).filter((f) => IMG_FILE_RE.test(f.type)) : [];
+        if (!files.length) return;                                       // no picture on the clipboard: normal paste
+        e.preventDefault();
+        insertImages(files);
+      });
+      body.addEventListener('dragover', (e) => {
+        if (!teamMode && body.contentEditable === 'true' && e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') >= 0) e.preventDefault();
+      });
+      body.addEventListener('drop', (e) => {
+        if (teamMode || body.contentEditable !== 'true') return;
+        const files = e.dataTransfer ? Array.from(e.dataTransfer.files || []).filter((f) => IMG_FILE_RE.test(f.type)) : [];
+        if (!files.length) return;
+        e.preventDefault();
+        let range = null;                                                // drop where the pointer is
+        if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(e.clientX, e.clientY);
+        else if (document.caretPositionFromPoint) {
+          const pos = document.caretPositionFromPoint(e.clientX, e.clientY);
+          if (pos) { range = document.createRange(); range.setStart(pos.offsetNode, pos.offset); }
+        }
+        if (range && body.contains(range.startContainer)) { const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
+        insertImages(files);
+      });
+
+      body.addEventListener('paste', (e) => {
+        if (e.defaultPrevented) return;                                  // an image paste already handled it
         if (teamMode || body.contentEditable !== 'true') return;        // shared docs stay plain text
         const cd = e.clipboardData || window.clipboardData;
         const raw = cd ? cd.getData('text/plain') : '';
