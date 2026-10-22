@@ -6,11 +6,7 @@ Infinite is a free goal and progress tracker that runs entirely in the browser. 
 
 Live site: https://you-are-amazing.github.io/infinite/
 
-> Originally inspired by Twisha Patel's concept and the name behind her repository
-> [twi-exe/life-is-short](https://github.com/twi-exe/life-is-short) -- a progress tracker that made the idea of
-> "your time is finite, track it on purpose" stick. Thanks Twisha, for an idea worth building on.
->
-> **Credit**: Inspired by Twisha Patel ([@twi-exe](https://github.com/twi-exe)) -- the core idea and name came from her amazing repository [life-is-short](https://github.com/twi-exe/life-is-short). Thanks to her for an amazing productivity concept.
+> **Credit**: Inspired by [twi-exe/life-is-short](https://github.com/twi-exe/life-is-short). Credit to the original creator for the core concept 
 
 ## Features
 
