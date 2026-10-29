@@ -78,8 +78,9 @@
   <!-- Shared doc helpers (sanitizer + "who wrote which part" stamps). Deliberately
        without defer: the inline page script below runs while the page is parsing. -->
   <script src="../static/js/doc-attrib.js?v=3"></script>
-  <!-- Client-side PDF export with white background & rich text, image and link support -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <!-- Client-side PDF export (white page, rich text, images, clickable links): html2canvas + jsPDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="../static/js/tour.js?v=1" defer></script>
 </head>
 <body>
@@ -1969,18 +1970,19 @@ function countAllNotes(arr) {
         const styleEl = document.createElement('style');
         styleEl.textContent = `
           #pdf-export-container {
-            position: absolute;
-            left: 0;
+            position: fixed;
+            left: -10000px;
             top: 0;
             width: 794px;
             box-sizing: border-box;
             background: #ffffff !important;
             color: #1e293b !important;
-            padding: 44px 40px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding: 20px 40px 24px;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             font-size: 14.5px;
             line-height: 1.75;
-            z-index: -9999;
+            opacity: 1;
+            visibility: visible;
             pointer-events: none;
           }
           #pdf-export-container * {
@@ -2122,6 +2124,20 @@ function countAllNotes(arr) {
             font-size: 11px !important;
             font-weight: 600 !important;
           }
+          #pdf-export-container .np-lc-title,
+          #pdf-export-container .np-lc-desc {
+            display: block !important;
+            overflow: visible !important;
+            -webkit-line-clamp: unset !important;
+          }
+          #pdf-export-container .np-lc-desc:empty {
+            display: none !important;
+          }
+          #pdf-export-container .np-lc-site {
+            display: block !important;
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+          }
           #pdf-export-container .np-lc-x {
             display: none !important;
           }
@@ -2161,19 +2177,43 @@ function countAllNotes(arr) {
         b.querySelectorAll('.np-lc-x').forEach((btn) => btn.remove());
         b.querySelectorAll('#np-img-box, #np-img-bar').forEach((el) => el.remove());
 
-        // Normalize any text that had dark-mode white/light text color hardcoded so it is readable on white paper
-        const lightColors = ['#fff', '#ffffff', 'white', 'rgb(255, 255, 255)', 'rgb(233, 239, 247)', '#e9eff7', 'var(--text)'];
-        b.querySelectorAll('[style*="color"]').forEach((el) => {
-          const c = (el.style.color || '').trim().toLowerCase();
-          if (lightColors.includes(c)) {
-            el.style.color = '#1e293b';
+        // The editor is a dark theme: text colours that are (near) white, or that come from the
+        // theme's CSS variables, would vanish on white paper. Real colours the person picked stay.
+        const toRgb = (c) => {
+          c = String(c || '').trim().toLowerCase();
+          if (c === 'white') return [255, 255, 255];
+          let m = c.match(/^#([0-9a-f]{3})$/);
+          if (m) return m[1].split('').map((h) => parseInt(h + h, 16));
+          m = c.match(/^#([0-9a-f]{6})$/);
+          if (m) return [0, 2, 4].map((i) => parseInt(m[1].substr(i, 2), 16));
+          m = c.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+          return m ? [+m[1], +m[2], +m[3]] : null;
+        };
+        const luma = (rgb) => (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+        const INK = '#1e293b';
+        b.querySelectorAll('[style]').forEach((el) => {
+          const col = (el.style.color || '').trim();
+          if (col) {
+            const rgb = toRgb(col);
+            if (/var\(/i.test(col) || (rgb && luma(rgb) > 0.9)) el.style.color = INK;
+          }
+          if (el.tagName !== 'MARK') {
+            const bg = (el.style.backgroundColor || el.style.background || '').trim();
+            const bgRgb = toRgb(bg);
+            if (/var\(/i.test(bg) || (bgRgb && luma(bgRgb) < 0.2)) {
+              el.style.removeProperty('background');
+              el.style.removeProperty('background-color');
+            }
           }
         });
         b.querySelectorAll('font[color]').forEach((el) => {
-          const c = (el.getAttribute('color') || '').trim().toLowerCase();
-          if (lightColors.includes(c)) {
-            el.setAttribute('color', '#1e293b');
-          }
+          const rgb = toRgb(el.getAttribute('color'));
+          if (rgb && luma(rgb) > 0.9) el.setAttribute('color', INK);
+        });
+        // Lazy images never load inside an off-screen container, so load them eagerly.
+        b.querySelectorAll('img').forEach((img) => {
+          img.loading = 'eager';
+          img.decoding = 'sync';
         });
 
         // Ensure highlight marks have readable dark text on their highlight background
@@ -2199,15 +2239,48 @@ function countAllNotes(arr) {
         }));
       }
 
+      /* Remote pictures (link-card thumbnails, pasted web images) are fetched and swapped for
+         data: URLs so the canvas is never tainted and nothing silently disappears. */
+      async function inlineRemoteImages(container) {
+        const imgs = Array.from(container.querySelectorAll('img')).filter((img) => {
+          const src = img.getAttribute('src') || '';
+          return src && !/^(data|blob):/i.test(src);
+        });
+        if (!imgs.length) return;
+        await Promise.all(imgs.map(async (img) => {
+          const src = img.getAttribute('src');
+          try {
+            const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+            const timer = ctl ? setTimeout(() => ctl.abort(), 8000) : null;
+            let res;
+            try {
+              res = await fetch(src, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctl ? ctl.signal : undefined });
+            } finally { if (timer) clearTimeout(timer); }
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const blob = await res.blob();
+            const dataUrl = await new Promise((ok, no) => {
+              const r = new FileReader();
+              r.onload = () => ok(r.result);
+              r.onerror = () => no(r.error);
+              r.readAsDataURL(blob);
+            });
+            await new Promise((done) => {
+              img.onload = () => done();
+              img.onerror = () => done();
+              img.removeAttribute('crossorigin');
+              img.src = dataUrl;
+              setTimeout(done, 4000);
+            });
+          } catch (e) {
+            // The server blocks cross-site reads: a preview thumbnail is optional, a pasted picture is retried by the renderer.
+            if (img.closest('.np-lc-thumb')) img.remove();
+            else img.setAttribute('crossorigin', 'anonymous');
+          }
+        }));
+      }
+
       function loadScriptAsync(src) {
         return new Promise((resolve, reject) => {
-          if (document.querySelector('script[src="' + src + '"]')) {
-            const checkInterval = setInterval(() => {
-              if (typeof window.html2pdf !== 'undefined') { clearInterval(checkInterval); resolve(); }
-            }, 50);
-            setTimeout(() => { clearInterval(checkInterval); resolve(); }, 3000);
-            return;
-          }
           const s = document.createElement('script');
           s.src = src;
           s.onload = () => resolve();
@@ -2216,20 +2289,24 @@ function countAllNotes(arr) {
         });
       }
 
-      async function ensureHtml2Pdf() {
-        if (typeof window.html2pdf !== 'undefined') return true;
-        const cdns = [
-          'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js',
-          'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js',
-          'https://unpkg.com/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js'
-        ];
-        for (const url of cdns) {
-          try {
-            await loadScriptAsync(url);
-            if (typeof window.html2pdf !== 'undefined') return true;
-          } catch (e) { /* try next */ }
+      async function ensureLib(isReady, urls) {
+        if (isReady()) return true;
+        for (const url of urls) {
+          try { await loadScriptAsync(url); if (isReady()) return true; } catch (e) { /* try the next CDN */ }
         }
-        return typeof window.html2pdf !== 'undefined';
+        return isReady();
+      }
+
+      async function ensurePdfLibs() {
+        const canvasOk = await ensureLib(() => typeof window.html2canvas === 'function', [
+          'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+          'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'
+        ]);
+        const pdfOk = await ensureLib(() => !!(window.jspdf && window.jspdf.jsPDF), [
+          'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+          'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'
+        ]);
+        return canvasOk && pdfOk;
       }
 
       function printPdfFallback(container, titleStr) {
@@ -2246,7 +2323,7 @@ function countAllNotes(arr) {
         idoc.open();
         idoc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' +
           (titleStr || 'Untitled note').replace(/[<>&"]/g, '') +
-          '</title><style>@page { size: A4; margin: 12mm; } body { margin: 0; background: #ffffff !important; color: #1e293b; } #pdf-export-container { position: static !important; z-index: auto !important; width: 100% !important; margin: 0 !important; }</style></head><body></body></html>');
+          '</title><style>@page { size: A4; margin: 12mm; } body { margin: 0; background: #ffffff !important; color: #1e293b; -webkit-print-color-adjust: exact; print-color-adjust: exact; } #pdf-export-container { position: static !important; left: auto !important; top: auto !important; z-index: auto !important; width: 100% !important; margin: 0 !important; }</style></head><body></body></html>');
         idoc.close();
         idoc.body.appendChild(container.cloneNode(true));
         idoc.close();
@@ -2260,6 +2337,125 @@ function countAllNotes(arr) {
           }
           setTimeout(() => iframe.remove(), 2500);
         }, 400);
+      }
+
+      /* Paints the prepared container onto A4 pages. Page breaks are chosen so a line of text,
+         a picture or a link card is never sliced in half, and every link stays clickable. */
+      async function renderContainerToPdf(container, fileName) {
+        const A4_W = 210, A4_H = 297, MARGIN_Y = 12;      // mm
+        const CSS_W = 794;                                 // container width in CSS px (= A4 width at 96dpi)
+        const MM = A4_W / CSS_W;                           // mm per CSS px
+        const pageH = (A4_H - 2 * MARGIN_Y) / MM;          // CSS px of content that fit on one page
+
+        if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (e) { /* ignore */ } }
+
+        const totalH = container.offsetHeight || 1123;   // (jsdom has no layout, hence the fallback)
+        const rootTop = container.getBoundingClientRect().top;
+
+        // Regions a page break must not run through
+        const unsafe = [];
+        const addRect = (r) => { if (r.height > 0) unsafe.push([r.top - rootTop, r.bottom - rootTop]); };
+        container.querySelectorAll('img, .np-linkcard, hr').forEach((el) => {
+          const r = el.getBoundingClientRect();
+          if (r.height < pageH) addRect(r);
+        });
+        container.querySelectorAll('blockquote, pre').forEach((el) => {
+          const r = el.getBoundingClientRect();
+          if (r.height < pageH * 0.6) addRect(r);
+        });
+        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+        const range = document.createRange();
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          if (!/\S/.test(n.nodeValue || '') || (n.parentNode && n.parentNode.tagName === 'STYLE')) continue;
+          range.selectNodeContents(n);
+          if (typeof range.getClientRects === 'function') Array.from(range.getClientRects()).forEach(addRect);
+        }
+
+        const breaks = [0];
+        let start = 0;
+        while (totalH - start > pageH + 0.5) {
+          let y = start + pageH;
+          for (let guard = 0; guard < 400; guard++) {
+            const hit = unsafe.find((u) => u[0] < y - 0.5 && u[1] > y + 0.5);
+            if (!hit) break;
+            y = hit[0];
+          }
+          if (y - start < pageH * 0.3) y = start + pageH;  // nothing sensible to snap to: cut anyway
+          breaks.push(y);
+          start = y;
+        }
+        breaks.push(totalH);
+
+        // Keep the canvas inside the browsers' size limits (long notes just render a little softer)
+        const scale = Math.max(0.75, Math.min(2, 16000 / totalH, Math.sqrt(16000000 / (CSS_W * totalH))));
+        const canvas = await window.html2canvas(container, {
+          scale,
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: '#ffffff',
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: CSS_W,
+          windowHeight: totalH,
+          onclone: (clonedDoc) => {
+            // The live container is parked off-screen; in the render copy it must sit at the origin.
+            const el = clonedDoc.getElementById('pdf-export-container');
+            if (el) {
+              el.style.position = 'absolute';
+              el.style.left = '0px';
+              el.style.top = '0px';
+              el.style.zIndex = 'auto';
+              el.style.opacity = '1';
+              el.style.visibility = 'visible';
+            }
+          }
+        });
+        if (!canvas || !canvas.width || !canvas.height) throw new Error('The note rendered as an empty canvas');
+
+        const ratio = canvas.width / CSS_W;               // canvas px per CSS px
+
+        // Links, mapped to the page they land on
+        const linksByPage = breaks.slice(0, -1).map(() => []);
+        container.querySelectorAll('a[href]').forEach((a) => {
+          const href = a.href;
+          if (!/^(https?:|mailto:)/i.test(href)) return;
+          const cRect = container.getBoundingClientRect();
+          Array.from(a.getClientRects()).forEach((r) => {
+            if (r.width < 1 || r.height < 1) return;
+            const y = r.top - cRect.top;
+            let pg = 0;
+            for (let i = 0; i < breaks.length - 1; i++) { if (y + 1 >= breaks[i]) pg = i; }
+            linksByPage[pg].push({ x: r.left - cRect.left, y: y - breaks[pg], w: r.width, h: r.height, url: href });
+          });
+        });
+
+        const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+        let pageCount = 0;
+        for (let i = 0; i < breaks.length - 1; i++) {
+          const sy = Math.round(breaks[i] * ratio);
+          const sh = Math.min(canvas.height, Math.round(breaks[i + 1] * ratio)) - sy;
+          if (sh <= 0) continue;
+          const pageCanvas = document.createElement('canvas');
+          pageCanvas.width = canvas.width;
+          pageCanvas.height = sh;
+          const ctx = pageCanvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+          ctx.drawImage(canvas, 0, sy, canvas.width, sh, 0, 0, canvas.width, sh);
+
+          if (pageCount > 0) doc.addPage('a4', 'portrait');
+          pageCount++;
+          doc.setFillColor(255, 255, 255);
+          doc.rect(0, 0, A4_W, A4_H, 'F');                // every page is pure white, edge to edge
+          const hMm = (sh / ratio) * MM;
+          doc.addImage(pageCanvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, MARGIN_Y, A4_W, hMm, undefined, 'FAST');
+          (linksByPage[i] || []).forEach((l) => {
+            doc.link(l.x * MM, MARGIN_Y + l.y * MM, l.w * MM, l.h * MM, { url: l.url });
+          });
+        }
+        if (!pageCount) throw new Error('Nothing to put in the PDF');
+        doc.save(fileName);
       }
 
       async function generateNotePdf(options) {
@@ -2278,36 +2474,13 @@ function countAllNotes(arr) {
 
         try {
           await waitForImages(container);
-          const hasLib = await ensureHtml2Pdf();
+          await inlineRemoteImages(container);
+          const hasLibs = await ensurePdfLibs();
 
-          if (!hasLib || typeof window.html2pdf === 'undefined') {
+          if (!hasLibs) {
             printPdfFallback(container, noteTitle);
           } else {
-            const opt = {
-              margin: [12, 12, 12, 12],
-              filename: fileName,
-              image: { type: 'jpeg', quality: 0.98 },
-              html2canvas: {
-                scale: 2,
-                useCORS: true,
-                letterRendering: true,
-                backgroundColor: '#ffffff',
-                logging: false,
-                scrollY: 0,
-                scrollX: 0
-              },
-              jsPDF: {
-                unit: 'mm',
-                format: 'a4',
-                orientation: 'portrait'
-              },
-              pagebreak: {
-                mode: ['avoid-all', 'css', 'legacy'],
-                avoid: ['.np-linkcard', 'img', 'blockquote']
-              },
-              enableLinks: true
-            };
-            await window.html2pdf().set(opt).from(container).save();
+            await renderContainerToPdf(container, fileName);
           }
 
           if (triggerBtn && originalBtnHtml) {

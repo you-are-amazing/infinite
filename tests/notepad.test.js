@@ -103,17 +103,30 @@ async function testNotePdfExport() {
   const page = openNotepad({ notes: richNote, user: ALICE });
   let exportedElement;
   let exportOptions;
-  page.window.html2pdf = () => ({
-    set(options) { exportOptions = options; return this; },
-    from(element) { exportedElement = element; return this; },
-    save() { return Promise.resolve(); }
-  });
+  let savedName;
+  const pdfCalls = [];
+  const canvasProto = page.window.HTMLCanvasElement.prototype;
+  canvasProto.getContext = () => ({ fillRect() {}, drawImage() {}, set fillStyle(v) {} });
+  canvasProto.toDataURL = () => 'data:image/jpeg;base64,AAAA';
+  page.window.html2canvas = (element, options) => {
+    exportedElement = element.cloneNode(true);
+    exportOptions = options;
+    return Promise.resolve({ width: 1588, height: 2246 });
+  };
+  page.window.jspdf = { jsPDF: function () {
+    this.addPage = () => pdfCalls.push('addPage');
+    this.setFillColor = () => {};
+    this.rect = () => {};
+    this.addImage = () => pdfCalls.push('addImage');
+    this.link = () => pdfCalls.push('link');
+    this.save = (name) => { savedName = name; };
+  } };
 
   page.document.getElementById('download-note-btn')
     .dispatchEvent(new page.window.Event('click', { bubbles: true }));
   page.document.querySelector('#pdf-export-container img')
     .dispatchEvent(new page.window.Event('error'));
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 20));
 
   check('the export includes note formatting, links, and images',
     exportedElement && /<strong>Bold<\/strong>/.test(exportedElement.innerHTML) &&
@@ -124,11 +137,16 @@ async function testNotePdfExport() {
       /href="https:\/\/example\.test"/.test(exportedElement.innerHTML) &&
       /alt="Note image"/.test(exportedElement.innerHTML),
     exportedElement && exportedElement.querySelector('.pdf-body').innerHTML);
-  check('PDF export is configured with a white background and clickable links',
-    exportOptions && exportOptions.html2canvas.backgroundColor === '#ffffff' &&
-      exportOptions.enableLinks === true);
+  check('PDF export is configured with a white background and CORS-safe images',
+    exportOptions && exportOptions.backgroundColor === '#ffffff' && exportOptions.useCORS === true);
+  check('the render copy is moved on-screen (this is what fixes the blank PDF)',
+    exportOptions && typeof exportOptions.onclone === 'function');
   check('the export stylesheet defines white-paper styling',
     exportedElement && /background: #ffffff !important/.test(exportedElement.querySelector('style').textContent));
+  check('the export is never hidden behind the page (no negative z-index)',
+    exportedElement && !/z-index:\s*-/.test(exportedElement.querySelector('style').textContent));
+  check('the PDF gets a page image and is saved under the note title',
+    pdfCalls.includes('addImage') && savedName === 'Formatted note.pdf', String(savedName));
   page.stop();
 
   const fallbackPage = openNotepad({ notes: richNote, user: ALICE });
@@ -146,11 +164,8 @@ async function testNotePdfExport() {
   });
   fallbackPage.window.setTimeout = (callback) => setTimeout(callback, 0);
   fallbackPage.window.console.error = () => {};
-  fallbackPage.window.html2pdf = () => ({
-    set(options) { return this; },
-    from(element) { return this; },
-    save() { return Promise.reject(new Error('Simulated PDF renderer failure')); }
-  });
+  fallbackPage.window.html2canvas = () => Promise.reject(new Error('Simulated PDF renderer failure'));
+  fallbackPage.window.jspdf = { jsPDF: function () {} };
   fallbackPage.document.getElementById('download-note-btn')
     .dispatchEvent(new fallbackPage.window.Event('click', { bubbles: true }));
   fallbackPage.document.querySelector('#pdf-export-container img')
