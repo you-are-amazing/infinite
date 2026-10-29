@@ -63,6 +63,20 @@ group('You can type in your own note');
   page.stop();
 }
 
+{
+  const page = openNotepad({ user: null });
+  page.document.getElementById('new-note-empty')
+    .dispatchEvent(new page.window.Event('click', { bubbles: true }));
+  check('a guest can create a note when their list is empty', page.storedNotes().length === 1);
+  check('the newly created guest note opens editable',
+    page.document.getElementById('np-editor').hidden === false && page.body.contentEditable === 'true');
+  page.title.value = 'Guest note';
+  page.title.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+  check('a guest-created note persists its title locally',
+    page.storedNotes()[0] && page.storedNotes()[0].title === 'Guest note');
+  page.stop();
+}
+
 group('The formatting toolbar works on your own note');
 
 {
@@ -70,7 +84,85 @@ group('The formatting toolbar works on your own note');
   const tools = page.document.querySelectorAll('.np-tools button:not(#share-team-btn)');
   check('there are formatting buttons', tools.length > 0);
   check('they are enabled on your own note', Array.from(tools).every((b) => !b.disabled));
+  const dlBtn = page.document.getElementById('download-note-btn');
+  check('the download note button is present in the toolbar', !!dlBtn);
+  check('the download note button is enabled on own note', dlBtn && !dlBtn.disabled);
+  check('sidebar items have a download button', page.document.querySelectorAll('.np-item-dl').length > 0);
   page.stop();
+}
+
+group('The note PDF export keeps rich content on a white page');
+
+async function testNotePdfExport() {
+  const richNote = [{
+    id: 'pdf-note',
+    title: 'Formatted note',
+    body: '<p><strong>Bold</strong> <em>Italic</em> <u>Underlined</u> <mark>Highlighted</mark> <span style="color: rgb(220, 38, 38)">Colored</span></p><p><a href="https://example.test">A link</a></p><p><img src="data:image/png;base64,abc" alt="Note image"></p>',
+    updatedAt: '2026-01-01T00:00:00.000Z'
+  }];
+  const page = openNotepad({ notes: richNote, user: ALICE });
+  let exportedElement;
+  let exportOptions;
+  page.window.html2pdf = () => ({
+    set(options) { exportOptions = options; return this; },
+    from(element) { exportedElement = element; return this; },
+    save() { return Promise.resolve(); }
+  });
+
+  page.document.getElementById('download-note-btn')
+    .dispatchEvent(new page.window.Event('click', { bubbles: true }));
+  page.document.querySelector('#pdf-export-container img')
+    .dispatchEvent(new page.window.Event('error'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  check('the export includes note formatting, links, and images',
+    exportedElement && /<strong>Bold<\/strong>/.test(exportedElement.innerHTML) &&
+      /<em>Italic<\/em>/.test(exportedElement.innerHTML) &&
+      /<u>Underlined<\/u>/.test(exportedElement.innerHTML) &&
+    /<mark[^>]*>Highlighted<\/mark>/.test(exportedElement.innerHTML) &&
+      /color: rgb\(220, 38, 38\)/.test(exportedElement.innerHTML) &&
+      /href="https:\/\/example\.test"/.test(exportedElement.innerHTML) &&
+      /alt="Note image"/.test(exportedElement.innerHTML),
+    exportedElement && exportedElement.querySelector('.pdf-body').innerHTML);
+  check('PDF export is configured with a white background and clickable links',
+    exportOptions && exportOptions.html2canvas.backgroundColor === '#ffffff' &&
+      exportOptions.enableLinks === true);
+  check('the export stylesheet defines white-paper styling',
+    exportedElement && /background: #ffffff !important/.test(exportedElement.querySelector('style').textContent));
+  page.stop();
+
+  const fallbackPage = openNotepad({ notes: richNote, user: ALICE });
+  let printedDocument;
+  const iframePrototype = fallbackPage.window.HTMLIFrameElement.prototype;
+  const contentWindowGetter = Object.getOwnPropertyDescriptor(iframePrototype, 'contentWindow').get;
+  Object.defineProperty(iframePrototype, 'contentWindow', {
+    configurable: true,
+    get() {
+      const frameWindow = contentWindowGetter.call(this);
+      frameWindow.focus = () => {};
+      frameWindow.print = () => { printedDocument = frameWindow.document; };
+      return frameWindow;
+    }
+  });
+  fallbackPage.window.setTimeout = (callback) => setTimeout(callback, 0);
+  fallbackPage.window.console.error = () => {};
+  fallbackPage.window.html2pdf = () => ({
+    set(options) { return this; },
+    from(element) { return this; },
+    save() { return Promise.reject(new Error('Simulated PDF renderer failure')); }
+  });
+  fallbackPage.document.getElementById('download-note-btn')
+    .dispatchEvent(new fallbackPage.window.Event('click', { bubbles: true }));
+  fallbackPage.document.querySelector('#pdf-export-container img')
+    .dispatchEvent(new fallbackPage.window.Event('error'));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const fallbackExport = printedDocument && printedDocument.querySelector('#pdf-export-container');
+  check('print fallback preserves the styled export wrapper and rich note content',
+    !!fallbackExport && /<strong>Bold<\/strong>/.test(fallbackExport.innerHTML) &&
+      /#pdf-export-container/.test(fallbackExport.querySelector('style').textContent) &&
+      /#pdf-export-container \{ position: static !important/.test(printedDocument.head.textContent));
+  fallbackPage.stop();
 }
 
 /* ================================================================== *
@@ -188,5 +280,10 @@ group('Signing out while a team doc is open lands you back in your own note');
 }
 
 /* ------------------------------------------------------------------ */
-console.log('\n' + passed + ' passed, ' + failed + ' failed');
-process.exit(failed ? 1 : 0);
+testNotePdfExport().then(() => {
+  console.log('\n' + passed + ' passed, ' + failed + ' failed');
+  process.exit(failed ? 1 : 0);
+}).catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

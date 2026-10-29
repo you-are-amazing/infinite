@@ -151,7 +151,8 @@ function setAccountActions(user) {
   if (!actions) return;
   actions.hidden = false;
   const name = (user?.displayName || localStorage.getItem(LIFE_IS_SHORT_NAME_KEY) || '').trim();
-  const label = user ? (name || user.email) : (name ? `${name} (Guest Mode)` : 'Guest Mode');
+  const isGuest = localStorage.getItem(LIFE_IS_SHORT_MODE_KEY) === 'guest';
+  const label = user ? (name || user.email) : (isGuest ? (name ? `${name} (Guest Mode)` : 'Guest Mode') : 'Not signed in');
   actions.innerHTML = '';
 
   const accountLabel = document.createElement('span');

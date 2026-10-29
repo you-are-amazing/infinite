@@ -84,7 +84,7 @@ function openNotepad(opts) {
   // Seed localStorage before the page script reads it.
   window.localStorage.setItem('life_notes', JSON.stringify(notes));
   window.localStorage.setItem('life_user_name', (user && user.displayName) || 'Guest');
-  window.localStorage.setItem('life_is_short_mode', user ? 'account' : 'guest');
+  window.localStorage.setItem('lifeIsShort_mode', user ? 'account' : 'guest');
 
   // Minimal stand-ins for the globals auth.js would normally have set by now.
   window.lifeIsShortUser = user;

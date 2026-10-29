@@ -78,6 +78,8 @@
   <!-- Shared doc helpers (sanitizer + "who wrote which part" stamps). Deliberately
        without defer: the inline page script below runs while the page is parsing. -->
   <script src="../static/js/doc-attrib.js?v=3"></script>
+  <!-- Client-side PDF export with white background & rich text, image and link support -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="../static/js/tour.js?v=1" defer></script>
 </head>
 <body>
@@ -164,6 +166,7 @@
             <span class="np-tt" data-tt="color"><button type="button" id="tt-color-btn" aria-label="Text colour" title="Text colour" style="width:auto; padding:0 12px;"><i class="fa-solid fa-font" style="margin-right:6px;"></i>Colour <i class="fa-solid fa-caret-down" style="margin-left:4px; font-size:10px;"></i></button><div class="np-pop" data-for="color"></div></span>
             <span class="np-tt" data-tt="hl"><button type="button" id="tt-hl-btn" aria-label="Highlight colour" title="Highlight colour" style="width:auto; padding:0 12px;"><i class="fa-solid fa-highlighter" style="margin-right:6px;"></i>Marker <i class="fa-solid fa-caret-down" style="margin-left:4px; font-size:10px;"></i></button><div class="np-pop" data-for="hl"></div></span>
             <button type="button" id="add-subnote-btn" aria-label="Add subnote" style="width:auto; padding:0 12px;"><i class="fa-solid fa-plus" style="margin-right:6px;"></i>Subnote</button>
+            <button type="button" id="download-note-btn" aria-label="Download note as PDF" title="Download note as PDF" style="width:auto; padding:0 12px;"><i class="fa-solid fa-file-arrow-down" style="margin-right:6px;"></i>Download PDF</button>
             <button type="button" id="share-team-btn" aria-label="Share with team" style="width:auto; padding:0 12px; margin-left:auto;" hidden><i class="fa-solid fa-share-nodes" style="margin-right:6px;"></i>Share with team</button>
           </div>
           <article id="note-body" contenteditable="false" role="textbox" aria-label="Note body"></article>
@@ -946,6 +949,15 @@ function countAllNotes(arr) {
           add.addEventListener('click', (e) => { e.stopPropagation(); addSubnote(note.id); });
           actions.appendChild(add);
         }
+        const dl = document.createElement('button');
+        dl.type = 'button';
+        dl.className = 'np-item-dl';
+        dl.title = 'Download note as PDF';
+        dl.setAttribute('aria-label', 'Download note as PDF');
+        dl.innerHTML = '<i class="fa-solid fa-file-arrow-down"></i>';
+        dl.addEventListener('click', (e) => { e.stopPropagation(); downloadNoteAsPdf(note.id, dl); });
+        actions.appendChild(dl);
+
         const del = document.createElement('button');
         del.type = 'button';
         del.className = 'np-del';
@@ -1938,6 +1950,7 @@ function countAllNotes(arr) {
       }
 
       $('add-subnote-btn').addEventListener('click', () => { if (activeId) addSubnote(activeId); });
+      $('download-note-btn')?.addEventListener('click', () => downloadCurrentNoteAsPdf($('download-note-btn')));
       document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => {
         if (body.contentEditable === 'false') return;   // read-only: the toolbar is disabled, and this is the belt
         if (button.dataset.value === 'blockquote' && toggleOffQuote()) return;
@@ -1945,6 +1958,403 @@ function countAllNotes(arr) {
         body.focus();
         updateNote();
       }));
+
+      /* =====================================================================
+       *  PDF Export (White background, preserving formatting, images & links)
+       * ===================================================================== */
+      function preparePdfElement(noteTitle, noteDateText, noteBodyHtml) {
+        const container = document.createElement('div');
+        container.id = 'pdf-export-container';
+
+        const styleEl = document.createElement('style');
+        styleEl.textContent = `
+          #pdf-export-container {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 794px;
+            box-sizing: border-box;
+            background: #ffffff !important;
+            color: #1e293b !important;
+            padding: 44px 40px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 14.5px;
+            line-height: 1.75;
+            z-index: -9999;
+            pointer-events: none;
+          }
+          #pdf-export-container * {
+            box-sizing: border-box;
+          }
+          #pdf-export-container .pdf-head {
+            margin-bottom: 22px;
+            padding-bottom: 14px;
+            border-bottom: 2px solid #e2e8f0;
+          }
+          #pdf-export-container .pdf-title {
+            font-size: 26px;
+            font-weight: 800;
+            color: #0f172a !important;
+            margin: 0 0 8px 0;
+            line-height: 1.25;
+            word-break: break-word;
+          }
+          #pdf-export-container .pdf-date {
+            font-size: 11px;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            color: #64748b !important;
+            font-weight: 600;
+            margin: 0;
+          }
+          #pdf-export-container .pdf-body {
+            color: #1e293b !important;
+            word-break: break-word;
+          }
+          #pdf-export-container b, #pdf-export-container strong {
+            font-weight: 700 !important;
+            color: inherit;
+          }
+          #pdf-export-container i, #pdf-export-container em {
+            font-style: italic !important;
+            color: inherit;
+          }
+          #pdf-export-container u {
+            text-decoration: underline !important;
+            text-underline-offset: 3px !important;
+          }
+          #pdf-export-container mark, #pdf-export-container mark.note-highlight {
+            background-color: #f8d878;
+            color: #0f172a !important;
+            padding: 1px 4px !important;
+            border-radius: 3px !important;
+            display: inline;
+          }
+          #pdf-export-container blockquote {
+            margin: 16px 0 !important;
+            padding: 10px 18px !important;
+            border-left: 4px solid #6366f1 !important;
+            background: #f8fafc !important;
+            color: #334155 !important;
+            border-radius: 0 6px 6px 0 !important;
+            font-style: italic !important;
+            page-break-inside: avoid;
+          }
+          #pdf-export-container ul, #pdf-export-container ol {
+            margin: 12px 0 !important;
+            padding-left: 26px !important;
+            color: #1e293b !important;
+          }
+          #pdf-export-container li {
+            margin: 4px 0 !important;
+          }
+          #pdf-export-container a:not(.np-lc-main) {
+            color: #0d9488 !important;
+            text-decoration: underline !important;
+            text-underline-offset: 3px !important;
+            font-weight: 500;
+            overflow-wrap: anywhere;
+          }
+          /* Link card preview styling on clean white paper */
+          #pdf-export-container .np-linkcard {
+            position: relative !important;
+            display: block !important;
+            max-width: 100% !important;
+            margin: 14px 0 !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 10px !important;
+            background: #f8fafc !important;
+            overflow: hidden !important;
+            font-size: 13px !important;
+            line-height: 1.4 !important;
+            page-break-inside: avoid !important;
+          }
+          #pdf-export-container .np-linkcard a.np-lc-main {
+            display: flex !important;
+            align-items: stretch !important;
+            min-height: 80px !important;
+            color: inherit !important;
+            text-decoration: none !important;
+          }
+          #pdf-export-container .np-lc-thumb {
+            flex: none !important;
+            width: 110px !important;
+            background: #f1f5f9 !important;
+            border-right: 1px solid #cbd5e1 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: hidden !important;
+          }
+          #pdf-export-container .np-lc-thumb img {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+            display: block !important;
+            margin: 0 !important;
+          }
+          #pdf-export-container .np-linkcard.np-lc-icononly .np-lc-thumb img {
+            width: 32px !important;
+            height: 32px !important;
+            object-fit: contain !important;
+            border-radius: 6px !important;
+          }
+          #pdf-export-container .np-lc-info {
+            flex: 1 !important;
+            min-width: 0 !important;
+            padding: 10px 14px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            gap: 3px !important;
+          }
+          #pdf-export-container .np-lc-title {
+            font-weight: 600 !important;
+            color: #0f172a !important;
+            font-size: 13.5px !important;
+          }
+          #pdf-export-container .np-lc-desc {
+            color: #475569 !important;
+            font-size: 12px !important;
+          }
+          #pdf-export-container .np-lc-site {
+            color: #0d9488 !important;
+            font-size: 11px !important;
+            font-weight: 600 !important;
+          }
+          #pdf-export-container .np-lc-x {
+            display: none !important;
+          }
+          /* Pasted images */
+          #pdf-export-container :not(.np-lc-thumb) > img {
+            display: block !important;
+            max-width: 100% !important;
+            height: auto !important;
+            margin: 14px 0 !important;
+            border-radius: 8px !important;
+            border: 1px solid #e2e8f0;
+            page-break-inside: avoid !important;
+          }
+        `;
+        container.appendChild(styleEl);
+
+        const head = document.createElement('div');
+        head.className = 'pdf-head';
+        const h1 = document.createElement('h1');
+        h1.className = 'pdf-title';
+        h1.textContent = noteTitle || 'Untitled note';
+        head.appendChild(h1);
+
+        if (noteDateText) {
+          const d = document.createElement('div');
+          d.className = 'pdf-date';
+          d.textContent = noteDateText;
+          head.appendChild(d);
+        }
+        container.appendChild(head);
+
+        const b = document.createElement('div');
+        b.className = 'pdf-body';
+        b.innerHTML = noteBodyHtml && noteBodyHtml.trim() ? noteBodyHtml : '<p style="color: #94a3b8; font-style: italic;">(Empty note)</p>';
+
+        // Remove editor-specific overlays and buttons
+        b.querySelectorAll('.np-lc-x').forEach((btn) => btn.remove());
+        b.querySelectorAll('#np-img-box, #np-img-bar').forEach((el) => el.remove());
+
+        // Normalize any text that had dark-mode white/light text color hardcoded so it is readable on white paper
+        const lightColors = ['#fff', '#ffffff', 'white', 'rgb(255, 255, 255)', 'rgb(233, 239, 247)', '#e9eff7', 'var(--text)'];
+        b.querySelectorAll('[style*="color"]').forEach((el) => {
+          const c = (el.style.color || '').trim().toLowerCase();
+          if (lightColors.includes(c)) {
+            el.style.color = '#1e293b';
+          }
+        });
+        b.querySelectorAll('font[color]').forEach((el) => {
+          const c = (el.getAttribute('color') || '').trim().toLowerCase();
+          if (lightColors.includes(c)) {
+            el.setAttribute('color', '#1e293b');
+          }
+        });
+
+        // Ensure highlight marks have readable dark text on their highlight background
+        b.querySelectorAll('mark, mark.note-highlight').forEach((m) => {
+          m.style.color = '#0f172a';
+          if (!m.style.background) m.style.background = '#f8d878';
+        });
+
+        container.appendChild(b);
+        return container;
+      }
+
+      async function waitForImages(container) {
+        const imgs = Array.from(container.querySelectorAll('img'));
+        if (!imgs.length) return;
+        await Promise.all(imgs.map((img) => {
+          if (img.complete && img.naturalWidth !== 0) return Promise.resolve();
+          return new Promise((resolve) => {
+            img.onload = () => resolve();
+            img.onerror = () => resolve();
+            setTimeout(resolve, 2500);
+          });
+        }));
+      }
+
+      function loadScriptAsync(src) {
+        return new Promise((resolve, reject) => {
+          if (document.querySelector('script[src="' + src + '"]')) {
+            const checkInterval = setInterval(() => {
+              if (typeof window.html2pdf !== 'undefined') { clearInterval(checkInterval); resolve(); }
+            }, 50);
+            setTimeout(() => { clearInterval(checkInterval); resolve(); }, 3000);
+            return;
+          }
+          const s = document.createElement('script');
+          s.src = src;
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error('Failed to load ' + src));
+          document.head.appendChild(s);
+        });
+      }
+
+      async function ensureHtml2Pdf() {
+        if (typeof window.html2pdf !== 'undefined') return true;
+        const cdns = [
+          'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js',
+          'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js',
+          'https://unpkg.com/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js'
+        ];
+        for (const url of cdns) {
+          try {
+            await loadScriptAsync(url);
+            if (typeof window.html2pdf !== 'undefined') return true;
+          } catch (e) { /* try next */ }
+        }
+        return typeof window.html2pdf !== 'undefined';
+      }
+
+      function printPdfFallback(container, titleStr) {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const idoc = iframe.contentWindow.document;
+        idoc.open();
+        idoc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' +
+          (titleStr || 'Untitled note').replace(/[<>&"]/g, '') +
+          '</title><style>@page { size: A4; margin: 12mm; } body { margin: 0; background: #ffffff !important; color: #1e293b; } #pdf-export-container { position: static !important; z-index: auto !important; width: 100% !important; margin: 0 !important; }</style></head><body></body></html>');
+        idoc.close();
+        idoc.body.appendChild(container.cloneNode(true));
+        idoc.close();
+
+        setTimeout(() => {
+          try {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+          } catch (e) {
+            window.print();
+          }
+          setTimeout(() => iframe.remove(), 2500);
+        }, 400);
+      }
+
+      async function generateNotePdf(options) {
+        const { title: noteTitle, dateText, bodyHtml, triggerBtn } = options || {};
+        const safeTitle = (noteTitle || 'Untitled note').trim().replace(/[/\\?%*:|"<>]/g, '-').slice(0, 80) || 'Untitled-Note';
+        const fileName = `${safeTitle}.pdf`;
+
+        const originalBtnHtml = triggerBtn ? triggerBtn.innerHTML : null;
+        if (triggerBtn) {
+          triggerBtn.disabled = true;
+          triggerBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Downloading...';
+        }
+
+        const container = preparePdfElement(noteTitle, dateText, bodyHtml);
+        document.body.appendChild(container);
+
+        try {
+          await waitForImages(container);
+          const hasLib = await ensureHtml2Pdf();
+
+          if (!hasLib || typeof window.html2pdf === 'undefined') {
+            printPdfFallback(container, noteTitle);
+          } else {
+            const opt = {
+              margin: [12, 12, 12, 12],
+              filename: fileName,
+              image: { type: 'jpeg', quality: 0.98 },
+              html2canvas: {
+                scale: 2,
+                useCORS: true,
+                letterRendering: true,
+                backgroundColor: '#ffffff',
+                logging: false,
+                scrollY: 0,
+                scrollX: 0
+              },
+              jsPDF: {
+                unit: 'mm',
+                format: 'a4',
+                orientation: 'portrait'
+              },
+              pagebreak: {
+                mode: ['avoid-all', 'css', 'legacy'],
+                avoid: ['.np-linkcard', 'img', 'blockquote']
+              },
+              enableLinks: true
+            };
+            await window.html2pdf().set(opt).from(container).save();
+          }
+
+          if (triggerBtn && originalBtnHtml) {
+            triggerBtn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:6px; color: var(--green);"></i>Downloaded!';
+            setTimeout(() => {
+              triggerBtn.disabled = false;
+              triggerBtn.innerHTML = originalBtnHtml;
+            }, 2000);
+          }
+        } catch (err) {
+          console.error('PDF export failed, falling back to print preview:', err);
+          printPdfFallback(container, noteTitle);
+          if (triggerBtn && originalBtnHtml) {
+            triggerBtn.disabled = false;
+            triggerBtn.innerHTML = originalBtnHtml;
+          }
+        } finally {
+          container.remove();
+        }
+      }
+
+      function downloadCurrentNoteAsPdf(triggerBtn) {
+        const note = activeNote();
+        const curTitle = (title && title.value != null ? title.value : (note && note.title)) || 'Untitled note';
+        const curBody = (body && body.innerHTML != null ? body.innerHTML : (note && note.body)) || '';
+        const curDate = (date && date.textContent) || (note && note.updatedAt ? `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}` : '');
+        return generateNotePdf({
+          title: curTitle,
+          dateText: curDate,
+          bodyHtml: curBody,
+          triggerBtn: triggerBtn || $('download-note-btn')
+        });
+      }
+
+      function downloadNoteAsPdf(noteId, triggerBtn) {
+        const note = findNoteById(notes, noteId);
+        if (!note) return;
+        if (note.id === activeId) {
+          return downloadCurrentNoteAsPdf(triggerBtn);
+        }
+        return generateNotePdf({
+          title: note.title || 'Untitled note',
+          dateText: note.updatedAt ? `LAST EDITED ${new Date(note.updatedAt).toLocaleString().toUpperCase()}` : '',
+          bodyHtml: note.body || '',
+          triggerBtn
+        });
+      }
 
       $('share-team-btn').addEventListener('click', openShare);
       $('share-send').addEventListener('click', sendShare);

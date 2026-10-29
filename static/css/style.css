@@ -1871,6 +1871,39 @@ table.lsheet td {
   color: #fff;
 }
 
+.np-item-dl {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  flex: none;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s ease, color .15s ease;
+}
+
+.np-item-dl:hover {
+  background: var(--surface3);
+  color: var(--green);
+}
+
+#download-note-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color .15s ease, border-color .15s ease;
+}
+
+#download-note-btn:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+
 /* ---- nested notes ---- */
 .np-node { min-width: 0; }
 
