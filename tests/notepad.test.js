@@ -119,6 +119,10 @@ async function testNotePdfExport() {
     this.rect = () => {};
     this.addImage = () => pdfCalls.push('addImage');
     this.link = () => pdfCalls.push('link');
+    this.setFont = () => {};
+    this.setFontSize = () => {};
+    this.getTextWidth = () => 10;
+    this.text = () => pdfCalls.push('text');
     this.save = (name) => { savedName = name; };
   } };
 

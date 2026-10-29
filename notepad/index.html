@@ -2430,6 +2430,53 @@ function countAllNotes(arr) {
           });
         });
 
+        // Real text for the PDF's invisible text layer: one entry per visual line, so the
+        // picture of the page can be selected, copied and searched like normal text.
+        const textByPage = breaks.slice(0, -1).map(() => []);
+        const pdfSafe = (t) => t
+          .replace(/[\u2018\u2019\u201A]/g, "'").replace(/[\u201C\u201D\u201E]/g, '"')
+          .replace(/[\u2013\u2014\u2212]/g, '-').replace(/\u2026/g, '...')
+          .replace(/[\u2022\u25CF\u25E6]/g, '*').replace(/[\u00A0\u2009\u200A\u202F]/g, ' ')
+          .replace(/[^\x20-\x7E\xA1-\xFF]/g, '');   // the built-in PDF font only knows Latin-1
+        if (typeof range.getClientRects === 'function') {
+          const cRect2 = container.getBoundingClientRect();
+          const tw2 = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+          for (let n = tw2.nextNode(); n; n = tw2.nextNode()) {
+            if (!/\S/.test(n.nodeValue || '')) continue;
+            const par = n.parentNode;
+            if (par && (par.tagName === 'STYLE' || (par.closest && par.closest('.np-lc-x')))) continue;
+            const wordRe = /\S+/g;
+            let m, cur = null;
+            const flush = () => {
+              if (!cur) return;
+              const text = pdfSafe(cur.text).trim();
+              if (text) {
+                const mid = cur.top + cur.h / 2;
+                let pg = 0;
+                for (let i = 0; i < breaks.length - 1; i++) { if (mid >= breaks[i]) pg = i; }
+                textByPage[pg].push({ text, x: cur.x, top: cur.top - breaks[pg], w: cur.w, h: cur.h });
+              }
+              cur = null;
+            };
+            while ((m = wordRe.exec(n.nodeValue))) {
+              range.setStart(n, m.index);
+              range.setEnd(n, m.index + m[0].length);
+              const rects = range.getClientRects();
+              if (!rects.length) continue;
+              const r = rects[0];
+              const x = r.left - cRect2.left, top = r.top - cRect2.top;
+              if (cur && Math.abs(top - cur.top) < 3 && x - (cur.x + cur.w) < 40) {
+                cur.text += ' ' + m[0];
+                cur.w = Math.max(cur.w, x + r.width - cur.x);
+              } else {
+                flush();
+                cur = { text: m[0], x, top, w: r.width, h: r.height };
+              }
+            }
+            flush();
+          }
+        }
+
         const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
         let pageCount = 0;
         for (let i = 0; i < breaks.length - 1; i++) {
@@ -2450,6 +2497,19 @@ function countAllNotes(arr) {
           doc.rect(0, 0, A4_W, A4_H, 'F');                // every page is pure white, edge to edge
           const hMm = (sh / ratio) * MM;
           doc.addImage(pageCanvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, MARGIN_Y, A4_W, hMm, undefined, 'FAST');
+          (textByPage[i] || []).forEach((t) => {
+            const targetW = t.w * MM;
+            let fs = Math.max(4, t.h * 0.62);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(fs);
+            const natural = doc.getTextWidth(t.text);
+            if (natural > 0 && targetW > 0) {
+              // stretch the font so the hidden text covers exactly the visible line
+              fs = Math.min(fs * 1.6, Math.max(fs * 0.5, fs * targetW / natural));
+              doc.setFontSize(fs);
+            }
+            doc.text(t.text, t.x * MM, MARGIN_Y + (t.top + t.h * 0.78) * MM, { renderingMode: 'invisible' });
+          });
           (linksByPage[i] || []).forEach((l) => {
             doc.link(l.x * MM, MARGIN_Y + l.y * MM, l.w * MM, l.h * MM, { url: l.url });
           });
